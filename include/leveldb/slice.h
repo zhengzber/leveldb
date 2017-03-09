@@ -22,6 +22,7 @@
 
 namespace leveldb {
 
+// represent key in leveldb
 class Slice {
  public:
   // Create an empty slice.
