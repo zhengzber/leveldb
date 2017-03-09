@@ -13,6 +13,10 @@
 
 namespace leveldb {
 
+// Allocate(bytes): if remaining space is enough, return alloc_ptr and update remaining space; if not-->AllocateFallback(bytes)： 
+// AllocateFallback(bytes)： if large than 1k: AllocateNewBlock(bytes); else AllocateNewBlock(4k) and set remaining space
+// AllocateNewBlock(bytes): alloc bytes and push it into blocks and update memory_usage_
+ 
 class Arena {
  public:
   Arena();
@@ -42,8 +46,7 @@ class Arena {
   std::vector<char*> blocks_;
 
   // Total memory usage of the arena.
-  port::AtomicPointer memory_usage_;
-
+  port::AtomicPointer memory_usage_; //像size_t memory_usage_
   // No copying allowed
   Arena(const Arena&);
   void operator=(const Arena&);
