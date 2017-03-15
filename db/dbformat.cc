@@ -50,6 +50,7 @@ const char* InternalKeyComparator::Name() const {
   return "leveldb.InternalKeyComparator";
 }
 
+//先比较user_key，如果相等；那么比较sequence number（这里直接比较uint64_t，如果sequence_number也相等，那么隐含地表示将会比较value_type即低8位）
 int InternalKeyComparator::Compare(const Slice& akey, const Slice& bkey) const {
   // Order by:
   //    increasing user key (according to user-supplied comparator)
@@ -123,20 +124,30 @@ bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
 
 LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
+  //kLength占5个字节，tag占8个字节
   size_t needed = usize + 13;  // A conservative estimate
   char* dst;
+  //如果需要的内存小于等于200字节，那么直接使用space_，否则从堆上分配
+  //这个设计挺好的，如果内存较小，没必要从堆上分配，直接使用内部的缓存即可，而且200字节也不大，避免了较小的key也从堆上分配的负担
   if (needed <= sizeof(space_)) {
     dst = space_;
   } else {
     dst = new char[needed];
   }
+  //start_指向整个内存的开始处
   start_ = dst;
+  //将user_key的大小和后面tag的8字节大小累加，放入vaint32中，放在dst的头部5字节中
   dst = EncodeVarint32(dst, usize + 8);
+  //kstart_指向user_key开始的char*
   kstart_ = dst;
+  //将user_key的数据拷贝到这里，此时dst=kstart_=user_key应该开始放置的位置
   memcpy(dst, user_key.data(), usize);
+  //跳过user_key的大小，指向tag的起始处
   dst += usize;
+  //将sequence_number和普通类型value_type序列化为二进制然后作为tag放到整个内存的最后8字节处
   EncodeFixed64(dst, PackSequenceAndType(s, kValueTypeForSeek));
   dst += 8;
+  //end_指向整个内存的末尾的下一个字节处 [start_, end_)表示这块内存
   end_ = dst;
 }
 
