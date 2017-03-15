@@ -48,6 +48,7 @@ class InternalKey;
 // Value types encoded as the last component of internal keys.
 // DO NOT CHANGE THESE ENUM VALUES: they are embedded in the on-disk
 // data structures.
+//存在于InternalKey的key的类型：普通类型和删除类型
 enum ValueType {
   kTypeDeletion = 0x0,
   kTypeValue = 0x1
@@ -60,6 +61,8 @@ enum ValueType {
 // ValueType, not the lowest).
 static const ValueType kValueTypeForSeek = kTypeValue;
 
+//也存在于InternalKey的内部，表示这个key的序号，做snapshot用的。64个二进制，其实高56位用于放序号，低8位用于放ValueType
+//这样序号和类型都放在8字节中
 typedef uint64_t SequenceNumber;
 
 // We leave eight bits empty at the bottom so a type and sequence#
@@ -67,6 +70,7 @@ typedef uint64_t SequenceNumber;
 static const SequenceNumber kMaxSequenceNumber =
     ((0x1ull << 56) - 1);
 
+//是InternalKey解析后的表示，包括用户key, 序号和类型（普通类型，删除类型）
 struct ParsedInternalKey {
   Slice user_key;
   SequenceNumber sequence;
@@ -79,11 +83,13 @@ struct ParsedInternalKey {
 };
 
 // Return the length of the encoding of "key".
+//给一个ParsedInternalKey，那么编码成InternalKey就是用user_key的大小加上8个字节来序列化sequence number和value_type
 inline size_t InternalKeyEncodingLength(const ParsedInternalKey& key) {
   return key.user_key.size() + 8;
 }
 
 // Append the serialization of "key" to *result.
+//将ParsedInternalKey序列化成二进制格式放入result
 extern void AppendInternalKey(std::string* result,
                               const ParsedInternalKey& key);
 
@@ -91,19 +97,26 @@ extern void AppendInternalKey(std::string* result,
 // stores the parsed data in "*result", and returns true.
 //
 // On error, returns false, leaves "*result" in an undefined state.
+//首先将internal_key解析成ParsedInternalKey即反序列化出user_key, sequence_num和value_type
+//如果解析正常返回true；如果解析出的数据有异常：例如result没有8个字节或者value_type解析
+//出的类型不合法（既不是普通类型也不是删除类型那么非法）那么返回false
 extern bool ParseInternalKey(const Slice& internal_key,
                              ParsedInternalKey* result);
 
 // Returns the user key portion of an internal key.
+//internal_key中包含sequence_number和value_type，去掉末尾的8字节，返回user_key
 inline Slice ExtractUserKey(const Slice& internal_key) {
   assert(internal_key.size() >= 8);
   return Slice(internal_key.data(), internal_key.size() - 8);
 }
 
+//从internal_key的最后8个字节解析成uint64_t，然后取低8位
 inline ValueType ExtractValueType(const Slice& internal_key) {
   assert(internal_key.size() >= 8);
   const size_t n = internal_key.size();
+  //将二进制数据的最后8个字节解析成uint64_t
   uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
+  //再去8字节的低8位，就是value_type
   unsigned char c = num & 0xff;
   return static_cast<ValueType>(c);
 }
@@ -143,21 +156,26 @@ class InternalFilterPolicy : public FilterPolicy {
 // incorrectly use string comparisons instead of an InternalKeyComparator.
 class InternalKey {
  private:
-  std::string rep_;
+  std::string rep_; //保存user_key, seq, value_type序列化后的二进制数据
  public:
   InternalKey() { }   // Leave rep_ as empty to indicate it is invalid
+  //将user_key, s, t序列化后保存在rep_中
   InternalKey(const Slice& user_key, SequenceNumber s, ValueType t) {
     AppendInternalKey(&rep_, ParsedInternalKey(user_key, s, t));
   }
 
+  //根据Slice进行复制
   void DecodeFrom(const Slice& s) { rep_.assign(s.data(), s.size()); }
+  //返回整个二进制数据
   Slice Encode() const {
     assert(!rep_.empty());
     return rep_;
   }
 
+  //返回user_key（即去掉rep_的末尾8字节，这8字节序列化了sequence number和value type）
   Slice user_key() const { return ExtractUserKey(rep_); }
 
+  //根据ParsedInternalKey进行复制
   void SetFrom(const ParsedInternalKey& p) {
     rep_.clear();
     AppendInternalKey(&rep_, p);
