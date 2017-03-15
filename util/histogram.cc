@@ -9,6 +9,7 @@
 
 namespace leveldb {
 
+//每个bucket的最大值
 const double Histogram::kBucketLimit[kNumBuckets] = {
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40, 45,
   50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 250, 300, 350, 400, 450,
@@ -77,6 +78,7 @@ double Histogram::Percentile(double p) const {
     sum += buckets_[b];
     if (sum >= threshold) {
       // Scale linearly within this bucket
+      //对百分比所在的bucket进行线性平滑
       double left_point = (b == 0) ? 0 : kBucketLimit[b-1];
       double right_point = kBucketLimit[b];
       double left_sum = sum - buckets_[b];
@@ -108,6 +110,7 @@ std::string Histogram::ToString() const {
   snprintf(buf, sizeof(buf),
            "Count: %.0f  Average: %.4f  StdDev: %.2f\n",
            num_, Average(), StandardDeviation());
+  // nice try
   r.append(buf);
   snprintf(buf, sizeof(buf),
            "Min: %.4f  Median: %.4f  Max: %.4f\n",
