@@ -9,12 +9,15 @@
 
 namespace leveldb {
 
+//8字节共64位二进制，其实高56位放seq,低8位放类型，返回一个uint64_t
+//高58位放入sequence number, 低8位放入valuetype
 static uint64_t PackSequenceAndType(uint64_t seq, ValueType t) {
   assert(seq <= kMaxSequenceNumber);
   assert(t <= kValueTypeForSeek);
   return (seq << 8) | t;
 }
 
+//将InternalKey解析后的表示序列化成二进制格式放在result中，其中刚开始放入user_key，然后放入8位uint64_t(包括seq,和type)
 void AppendInternalKey(std::string* result, const ParsedInternalKey& key) {
   result->append(key.user_key.data(), key.user_key.size());
   PutFixed64(result, PackSequenceAndType(key.sequence, key.type));
