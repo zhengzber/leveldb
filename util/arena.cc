@@ -38,12 +38,13 @@ char* Arena::AllocateFallback(size_t bytes) {
   return result;
 }
 
+//分配对齐的内存地址
 char* Arena::AllocateAligned(size_t bytes) {
   const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
   assert((align & (align-1)) == 0);   // Pointer size should be a power of 2
   size_t current_mod = reinterpret_cast<uintptr_t>(alloc_ptr_) & (align-1);
   size_t slop = (current_mod == 0 ? 0 : align - current_mod);
-  size_t needed = bytes + slop;
+  size_t needed = bytes + slop; //如果没有对齐，需要进行偏移
   char* result;
   if (needed <= alloc_bytes_remaining_) {
     result = alloc_ptr_ + slop;
