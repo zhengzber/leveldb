@@ -204,6 +204,10 @@ inline bool ParseInternalKey(const Slice& internal_key,
 }
 
 // A helper class useful for DBImpl::Get()
+//LookupKey表示一块内存，前5个字节是后面uer_key+tag的大小，起始地址是start_
+//中间是user_key，起始地址是kstart_
+//最后8个字节的tag为序列化的sequence number和标识普通类型的value_type
+// start_[后面user_key+tag的大小](5个字节)+kstart_(user_key的起始地址)...+(最后8字节为sequence_number和普通类型value_type的序列化)end_
 class LookupKey {
  public:
   // Initialize *this for looking up user_key at a snapshot with
@@ -216,30 +220,31 @@ class LookupKey {
   Slice memtable_key() const { return Slice(start_, end_ - start_); }
 
   // Return an internal key (suitable for passing to an internal iterator)
+  //返回一个InternalKey，从kstart_开始，大小为end_-kstart_
   Slice internal_key() const { return Slice(kstart_, end_ - kstart_); }
 
   // Return the user key
+  //返回user_key，从kstart_开始，大小为end-kstart_-8，其中8表示tag的大小
   Slice user_key() const { return Slice(kstart_, end_ - kstart_ - 8); }
 
  private:
   // We construct a char array of the form:
-  //    klength  varint32               <-- start_
-  //    userkey  char[klength]          <-- kstart_
-  //    tag      uint64
-  //                                    <-- end_
+  //    klength  varint32 (最大会占5个字节)              <-- start_：此为整个内存的起始处
+  //    userkey  char[klength]          <-- kstart_：此为user_key的起始处
+  //    tag      uint64                 <-- end_：整个内存的下一个字节处
   // The array is a suitable MemTable key.
   // The suffix starting with "userkey" can be used as an InternalKey.
-  const char* start_;
-  const char* kstart_;
-  const char* end_;
-  char space_[200];      // Avoid allocation for short keys
-
+  const char* start_;//整个内存的起始地址
+  const char* kstart_;//user_key的起始地址
+  const char* end_;//整个内存的末尾的下一个字节
+  char space_[200];      // Avoid allocation for short keys，如果内存够小，那么使用这个内存，否则要用new来分配
   // No copying allowed
   LookupKey(const LookupKey&);
   void operator=(const LookupKey&);
 };
 
 inline LookupKey::~LookupKey() {
+  //如果没使用space_的内存，那么是用new从堆上分配的，需要delete掉
   if (start_ != space_) delete[] start_;
 }
 
