@@ -20,9 +20,10 @@ static Slice GetLengthPrefixedSlice(const char* data) {
 }
 
 MemTable::MemTable(const InternalKeyComparator& cmp)
-    : comparator_(cmp),
-      refs_(0),
-      table_(comparator_, &arena_) {
+    : comparator_(cmp), //InternalKeyComparator来初始化comparator_
+      refs_(0), //引用计数初始化为0
+      table_(comparator_, &arena_) //初始化skiplist
+      {
 }
 
 MemTable::~MemTable() {
@@ -51,6 +52,7 @@ static const char* EncodeKey(std::string* scratch, const Slice& target) {
   return scratch->data();
 }
 
+//基本上memtable的迭代器是一个代理类，调用的都是memtable内部skiplist的迭代器的方法.
 class MemTableIterator: public Iterator {
  public:
   explicit MemTableIterator(MemTable::Table* table) : iter_(table) { }
@@ -61,16 +63,16 @@ class MemTableIterator: public Iterator {
   virtual void SeekToLast() { iter_.SeekToLast(); }
   virtual void Next() { iter_.Next(); }
   virtual void Prev() { iter_.Prev(); }
-  virtual Slice key() const { return GetLengthPrefixedSlice(iter_.key()); }
+  virtual Slice key() const { return GetLengthPrefixedSlice(iter_.key()); } //返回的是LookupKey
   virtual Slice value() const {
-    Slice key_slice = GetLengthPrefixedSlice(iter_.key());
-    return GetLengthPrefixedSlice(key_slice.data() + key_slice.size());
+    Slice key_slice = GetLengthPrefixedSlice(iter_.key());//LookupKey
+    return GetLengthPrefixedSlice(key_slice.data() + key_slice.size());//返回的是value
   }
 
   virtual Status status() const { return Status::OK(); }
 
  private:
-  MemTable::Table::Iterator iter_;
+  MemTable::Table::Iterator iter_; //skiplist的迭代器
   std::string tmp_;       // For passing to EncodeKey
 
   // No copying allowed
