@@ -24,7 +24,8 @@ class MemTable {
   explicit MemTable(const InternalKeyComparator& comparator);
 
   // Increase reference count.
-  void Ref() { ++refs_; }
+  //存在引用计数，一开始为0
+  void Ref() { ++refs_; } 
 
   // Drop reference count.  Delete if no more references exist.
   void Unref() {
@@ -37,6 +38,7 @@ class MemTable {
 
   // Returns an estimate of the number of bytes of data in use by this
   // data structure. It is safe to call when MemTable is being modified.
+  // 调用arena的MemoryUsage.因为这里面所有的内存都是从arena里面分配的.
   size_t ApproximateMemoryUsage();
 
   // Return an iterator that yields the contents of the memtable.
@@ -45,6 +47,7 @@ class MemTable {
   // while the returned iterator is live.  The keys returned by this
   // iterator are internal keys encoded by AppendInternalKey in the
   // db/format.{h,cc} module.
+  //产生新的迭代器
   Iterator* NewIterator();
 
   // Add an entry into memtable that maps key to value at the
@@ -73,11 +76,10 @@ class MemTable {
 
   typedef SkipList<const char*, KeyComparator> Table;
 
-  KeyComparator comparator_;
-  int refs_;
-  Arena arena_;
-  Table table_;
-
+  KeyComparator comparator_;//key比较器
+  int refs_; //引用计数
+  Arena arena_; //内存分配
+  Table table_;//底层table结构是用skiplist存储的
   // No copying allowed
   MemTable(const MemTable&);
   void operator=(const MemTable&);
