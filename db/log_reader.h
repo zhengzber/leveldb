@@ -20,6 +20,7 @@ namespace log {
 class Reader {
  public:
   // Interface for reporting errors.
+  //汇报错误接口
   class Reporter {
    public:
     virtual ~Reporter();
@@ -58,21 +59,21 @@ class Reader {
   uint64_t LastRecordOffset();
 
  private:
-  SequentialFile* const file_;
-  Reporter* const reporter_;
-  bool const checksum_;
-  char* const backing_store_;
-  Slice buffer_;
-  bool eof_;   // Last Read() indicated EOF by returning < kBlockSize
-
+  SequentialFile* const file_; //顺序读取文件对象
+  Reporter* const reporter_;//报告错误对象
+  bool const checksum_;//是否要进行crc校验
+  char* const backing_store_; //block buffer
+  Slice buffer_; //record buffer
+  bool eof_;   // Last Read() indicated EOF by returning < kBlockSize.表示上次读取是否达到尾部
+ 
   // Offset of the last record returned by ReadRecord.
-  uint64_t last_record_offset_;
+  uint64_t last_record_offset_; //上次读取record的偏移量
   // Offset of the first location past the end of buffer_.
-  uint64_t end_of_buffer_offset_;
-
+  uint64_t end_of_buffer_offset_; //读取record之后顺序文件偏移
+ 
   // Offset at which to start looking for the first record to return
-  uint64_t const initial_offset_;
-
+  uint64_t const initial_offset_; //开始读取的初始偏移量
+ 
   // True if we are resynchronizing after a seek (initial_offset_ > 0). In
   // particular, a run of kMiddleType and kLastType records can be silently
   // skipped in this mode
