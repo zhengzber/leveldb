@@ -125,7 +125,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         }
         prospective_record_offset = physical_record_offset;
         scratch->assign(fragment.data(), fragment.size());
-        in_fragmented_record = true;
+        in_fragmented_record = true; //下条记录是当前记录的一部分
         break;
 
       case kMiddleType:
