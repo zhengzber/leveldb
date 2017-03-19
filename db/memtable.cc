@@ -131,6 +131,8 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
     // Check that it belongs to same user key.  We do not check the
     // sequence number since the Seek() call above should have skipped
     // all entries with overly large sequence numbers.
+    //这里不需要再检查sequence number了，因为seek已经跳过了所有值更大的sequence number了（因为InternalKeyComparator的比较函数是先按照user_key的
+    //升序来比较，然后按照sequence number的降序来比较）
     const char* entry = iter.key();//table中的key（结构为InternalKey_size+InternalKey+value_size+value）
     uint32_t key_length;
     const char* key_ptr = GetVarint32Ptr(entry, entry+5, &key_length);//获得InternalKey的size
