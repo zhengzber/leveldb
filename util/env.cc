@@ -4,6 +4,7 @@
 
 #include "leveldb/env.h"
 
+//主要是把一些对象的析构函数放在这里
 namespace leveldb {
 
 Env::~Env() {
@@ -41,16 +42,16 @@ static Status DoWriteStringToFile(Env* env, const Slice& data,
                                   const std::string& fname,
                                   bool should_sync) {
   WritableFile* file;
-  Status s = env->NewWritableFile(fname, &file);
+  Status s = env->NewWritableFile(fname, &file);//创建一个可写的文件，对应fname
   if (!s.ok()) {
     return s;
   }
-  s = file->Append(data);
+  s = file->Append(data); //将data写入到文件中
   if (s.ok() && should_sync) {
-    s = file->Sync();
+    s = file->Sync(); //刷新到磁盘
   }
   if (s.ok()) {
-    s = file->Close();
+    s = file->Close(); //关闭文件句柄
   }
   delete file;  // Will auto-close if we did not close above
   if (!s.ok()) {
@@ -77,14 +78,15 @@ Status ReadFileToString(Env* env, const std::string& fname, std::string* data) {
     return s;
   }
   static const int kBufferSize = 8192;
-  char* space = new char[kBufferSize];
+  char* space = new char[kBufferSize];  //一个8k的buffer
   while (true) {
     Slice fragment;
-    s = file->Read(kBufferSize, &fragment, space);
+    s = file->Read(kBufferSize, &fragment, space);//每次最多读8k到space中
     if (!s.ok()) {
       break;
     }
-    data->append(fragment.data(), fragment.size());
+    data->append(fragment.data(), fragment.size()); //将buffer数据append到string*data中
+    //如果fragment是空的，那么file已读完
     if (fragment.empty()) {
       break;
     }
