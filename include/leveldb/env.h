@@ -46,6 +46,7 @@ class Env {
   // not exist, returns a non-OK status.
   //
   // The returned file will only be accessed by one thread at a time.
+  //创建一个顺序文件
   virtual Status NewSequentialFile(const std::string& fname,
                                    SequentialFile** result) = 0;
 
@@ -56,6 +57,7 @@ class Env {
   // status.
   //
   // The returned file may be concurrently accessed by multiple threads.
+  //创建一个随机文件，是ready-only的
   virtual Status NewRandomAccessFile(const std::string& fname,
                                      RandomAccessFile** result) = 0;
 
@@ -66,6 +68,7 @@ class Env {
   // returns non-OK.
   //
   // The returned file will only be accessed by one thread at a time.
+  //创建可写文件（如果文件已存在，那么删除旧文件）
   virtual Status NewWritableFile(const std::string& fname,
                                  WritableFile** result) = 0;
 
@@ -81,31 +84,39 @@ class Env {
   // not allow appending to an existing file.  Users of Env (including
   // the leveldb implementation) must be prepared to deal with
   // an Env that does not support appending.
+  //创建可追加记录的文件（和可写文件的区别是，可写文件会删除已存在的文件然后创建新的；而可追加文件会在已存在文件后追加记录）
   virtual Status NewAppendableFile(const std::string& fname,
                                    WritableFile** result);
 
   // Returns true iff the named file exists.
+  //文件是否存在
   virtual bool FileExists(const std::string& fname) = 0;
 
   // Store in *result the names of the children of the specified directory.
   // The names are relative to "dir".
   // Original contents of *results are dropped.
+  //获得目录下面的文件
   virtual Status GetChildren(const std::string& dir,
                              std::vector<std::string>* result) = 0;
 
   // Delete the named file.
+  //删除文件
   virtual Status DeleteFile(const std::string& fname) = 0;
 
-  // Create the specified directory.
+  // Create the specified directory. 
+  //创建目录
   virtual Status CreateDir(const std::string& dirname) = 0;
 
   // Delete the specified directory.
+  //删除目录
   virtual Status DeleteDir(const std::string& dirname) = 0;
 
   // Store the size of fname in *file_size.
+  //获得文件数据大小
   virtual Status GetFileSize(const std::string& fname, uint64_t* file_size) = 0;
 
   // Rename file src to target.
+  //重命名文件
   virtual Status RenameFile(const std::string& src,
                             const std::string& target) = 0;
 
@@ -123,11 +134,13 @@ class Env {
   // to go away.
   //
   // May create the named file if it does not already exist.
+  //锁住文件以防并发访问，如果已被锁住，直接返回失败（若文件不存在，会创建出文件并锁住）
   virtual Status LockFile(const std::string& fname, FileLock** lock) = 0;
 
   // Release the lock acquired by a previous successful call to LockFile.
   // REQUIRES: lock was returned by a successful LockFile() call
   // REQUIRES: lock has not already been unlocked.
+  //解锁文件
   virtual Status UnlockFile(FileLock* lock) = 0;
 
   // Arrange to run "(*function)(arg)" once in a background thread.
@@ -136,21 +149,25 @@ class Env {
   // added to the same Env may run concurrently in different threads.
   // I.e., the caller may not assume that background work items are
   // serialized.
+  //将function放在background thread中执行
   virtual void Schedule(
       void (*function)(void* arg),
       void* arg) = 0;
 
   // Start a new thread, invoking "function(arg)" within the new thread.
   // When "function(arg)" returns, the thread will be destroyed.
+  //创建线程执行某函数，函数执行完后线程被销毁
   virtual void StartThread(void (*function)(void* arg), void* arg) = 0;
 
   // *path is set to a temporary directory that can be used for testing. It may
   // or many not have just been created. The directory may or may not differ
   // between runs of the same process, but subsequent calls will return the
   // same directory.
+  //获得一个测试目录
   virtual Status GetTestDirectory(std::string* path) = 0;
 
   // Create and return a log file for storing informational messages.
+  //创建logger打印到对应文件
   virtual Status NewLogger(const std::string& fname, Logger** result) = 0;
 
   // Returns the number of micro-seconds since some fixed point in time. Only
