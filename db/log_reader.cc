@@ -20,7 +20,7 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum,
     : file_(file),
       reporter_(reporter),
       checksum_(checksum),
-      backing_store_(new char[kBlockSize]),
+      backing_store_(new char[kBlockSize]),//block的临时buffer
       buffer_(),
       eof_(false),
       last_record_offset_(0),
@@ -30,7 +30,7 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum,
 }
 
 Reader::~Reader() {
-  delete[] backing_store_;
+  delete[] backing_store_;//释放block的临时buffer
 }
 
 bool Reader::SkipToInitialBlock() {
@@ -196,20 +196,24 @@ void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
   }
 }
 
+//从文件里读取出一个kBlocksize大小的物理块出来，放在backingstore_里
 unsigned int Reader::ReadPhysicalRecord(Slice* result) {
   while (true) {
-    if (buffer_.size() < kHeaderSize) {
-      if (!eof_) {
+    if (buffer_.size() < kHeaderSize) { //如果之前读取的内容不够kHeaderSize大小的话
+      if (!eof_) { //如果上次读取没有到末尾的话，那么认为上次读取无效，直接忽略
         // Last read was a full read, so this is a trailer to skip
         buffer_.clear();
+        //忽略之后，重新读取一个新块
         Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
-        end_of_buffer_offset_ += buffer_.size();
-        if (!status.ok()) {
+        end_of_buffer_offset_ += buffer_.size(); //缓存块偏移指向这个块的结尾
+        if (!status.ok()) { //如果读取失败
           buffer_.clear();
           ReportDrop(kBlockSize, status);
           eof_ = true;
-          return kEof;
-        } else if (buffer_.size() < kBlockSize) {
+          return kEof; //返回结尾
+        } else if (buffer_.size() < kBlockSize) { 
+          //读取成功，但已经达到结尾了，重新判断读取的是否为正确的记录。如果没有读取正确的记录（<kHeaderSize），
+          //那么会进入下面的错误逻辑，否则进入正常逻辑
           eof_ = true;
         }
         continue;
@@ -223,13 +227,14 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
+    //假设到这里的话，我们已经读取一个完整的block了，解析记录头
     // Parse the header
     const char* header = buffer_.data();
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
-    const unsigned int type = header[6];
-    const uint32_t length = a | (b << 8);
-    if (kHeaderSize + length > buffer_.size()) {
+    const unsigned int type = header[6]; //记录类型
+    const uint32_t length = a | (b << 8);//记录长度
+    if (kHeaderSize + length > buffer_.size()) { //如果记录头+长度大于buffer大小，那么读取到的记录有异常
       size_t drop_size = buffer_.size();
       buffer_.clear();
       if (!eof_) {
@@ -242,6 +247,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kEof;
     }
 
+    //直接忽略数据长度为0的记录
     if (type == kZeroType && length == 0) {
       // Skip zero length record without reporting any drops since
       // such records are produced by the mmap based writing code in
@@ -253,8 +259,8 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     // Check crc
     if (checksum_) {
       uint32_t expected_crc = crc32c::Unmask(DecodeFixed32(header));
-      uint32_t actual_crc = crc32c::Value(header + 6, 1 + length);
-      if (actual_crc != expected_crc) {
+      uint32_t actual_crc = crc32c::Value(header + 6, 1 + length);//做crc校验，需要包含type字段
+      if (actual_crc != expected_crc) { //校验失败，丢掉buffer
         // Drop the rest of the buffer since "length" itself may have
         // been corrupted and if we trust it, we could find some
         // fragment of a real log record that just happens to look
@@ -266,15 +272,19 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
+    //buffer_是一块的长度，当读取结束一条记录时
+    //buffer_指向内容的指针向前移动KheaderSize+length，即下一条记录的起始地址
     buffer_.remove_prefix(kHeaderSize + length);
 
     // Skip physical record that started before initial_offset_
+    //跳过初始地址之前的记录
     if (end_of_buffer_offset_ - buffer_.size() - kHeaderSize - length <
         initial_offset_) {
       result->clear();
       return kBadRecord;
     }
 
+    //获取记录内容部分
     *result = Slice(header + kHeaderSize, length);
     return type;
   }
