@@ -172,9 +172,11 @@ class Env {
 
   // Returns the number of micro-seconds since some fixed point in time. Only
   // useful for computing deltas of time.
+  //当前时间us单位
   virtual uint64_t NowMicros() = 0;
 
   // Sleep/delay the thread for the prescribed number of micro-seconds.
+  //休眠micros us
   virtual void SleepForMicroseconds(int micros) = 0;
 
  private:
@@ -184,6 +186,7 @@ class Env {
 };
 
 // A file abstraction for reading sequentially through a file
+//顺序读取文件的抽象，提供读取文件和skip的接口。需要外部措施来保证同步
 class SequentialFile {
  public:
   SequentialFile() { }
@@ -206,6 +209,7 @@ class SequentialFile {
   // file, and Skip will return OK.
   //
   // REQUIRES: External synchronization
+  //跳过n字节
   virtual Status Skip(uint64_t n) = 0;
 
  private:
@@ -215,6 +219,7 @@ class SequentialFile {
 };
 
 // A file abstraction for randomly reading the contents of a file.
+//随机读取文件的抽象
 class RandomAccessFile {
  public:
   RandomAccessFile() { }
@@ -229,6 +234,7 @@ class RandomAccessFile {
   // status.
   //
   // Safe for concurrent use by multiple threads.
+  //从offset读取n个字节放入scratch，然后将result的指针指向scratch
   virtual Status Read(uint64_t offset, size_t n, Slice* result,
                       char* scratch) const = 0;
 
@@ -241,6 +247,8 @@ class RandomAccessFile {
 // A file abstraction for sequential writing.  The implementation
 // must provide buffering since callers may append small fragments
 // at a time to the file.
+//WritableFile语义就是允许Append,Close,Flush,Sync.这里Flush的语义应该是将内部缓存数据完全写入， 
+//而Sync表示让磁盘进行同步。因为可能外部会调用小对象的写入，所以这里需要进行缓存。实现是PosixMmapFile. 
 class WritableFile {
  public:
   WritableFile() { }
@@ -258,6 +266,7 @@ class WritableFile {
 };
 
 // An interface for writing log messages.
+//log的抽象，允许打印变长参数
 class Logger {
  public:
   Logger() { }
@@ -274,6 +283,8 @@ class Logger {
 
 
 // Identifies a locked file.
+//FileLock接口非常简单，可以说就没有接口.唯一要做的事情就是和Env里面的
+//LockFile与UnlockFile配合。实现是PosixFileLock.
 class FileLock {
  public:
   FileLock() { }
@@ -292,16 +303,19 @@ extern void Log(Logger* info_log, const char* format, ...)
     ;
 
 // A utility routine: write "data" to the named file.
+//将data中数据写入到fname对应文件中
 extern Status WriteStringToFile(Env* env, const Slice& data,
                                 const std::string& fname);
 
 // A utility routine: read contents of named file into *data
+//将fname对应的文件内容读到data中
 extern Status ReadFileToString(Env* env, const std::string& fname,
                                std::string* data);
 
 // An implementation of Env that forwards all calls to another Env.
 // May be useful to clients who wish to override just part of the
 // functionality of another Env.
+//Env的代理类。包含Env成员，任何接口都是调用Env的接口然后转发出去。这个类就是得到一个Env*对象然后重新转发出去
 class EnvWrapper : public Env {
  public:
   // Initialize an EnvWrapper that delegates all calls to *t
