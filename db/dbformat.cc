@@ -50,7 +50,9 @@ const char* InternalKeyComparator::Name() const {
   return "leveldb.InternalKeyComparator";
 }
 
-//先比较user_key，如果相等；那么比较sequence number（这里直接比较uint64_t，如果sequence_number也相等，那么隐含地表示将会比较value_type即低8位）
+//先比较user_key，如果相等；那么比较sequence number（这里直接比较uint64_t，如果sequence_number也相等，
+//那么隐含地表示将会比较value_type即低8位）
+//先按user_key的升序排序；如果相等，然后按照sequence number的降序排序；如果相等，那么按照value_type的降序排序
 int InternalKeyComparator::Compare(const Slice& akey, const Slice& bkey) const {
   // Order by:
   //    increasing user key (according to user-supplied comparator)
