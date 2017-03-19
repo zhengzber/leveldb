@@ -33,14 +33,12 @@ class Writer {
   Status AddRecord(const Slice& slice);
 
  private:
-  WritableFile* dest_;
-  int block_offset_;       // Current offset in block
-
+  WritableFile* dest_; //log日志文件封装类
+  int block_offset_;       // Current offset in block，在当前block的偏移量
   // crc32c values for all supported record types.  These are
   // pre-computed to reduce the overhead of computing the crc of the
   // record type stored in the header.
-  uint32_t type_crc_[kMaxRecordType + 1];
-
+  uint32_t type_crc_[kMaxRecordType + 1];//各种类型的crc2c，避免重复计算
   Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
 
   // No copying allowed
