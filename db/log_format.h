@@ -11,22 +11,23 @@
 namespace leveldb {
 namespace log {
 
+//log的类型
 enum RecordType {
   // Zero is reserved for preallocated files
   kZeroType = 0,
 
-  kFullType = 1,
-
+  kFullType = 1,//这是一条完整的记录
   // For fragments
-  kFirstType = 2,
-  kMiddleType = 3,
-  kLastType = 4
+  kFirstType = 2,//这是一条记录的第一部分
+  kMiddleType = 3,//这是一条记录的中间部分
+  kLastType = 4//这是一条记录的最后部分
 };
 static const int kMaxRecordType = kLastType;
 
 static const int kBlockSize = 32768;
 
 // Header is checksum (4 bytes), length (2 bytes), type (1 byte).
+//一个bloack的header是怎么安排的。length（2字节）表示数据部分的长度
 static const int kHeaderSize = 4 + 2 + 1;
 
 }  // namespace log
