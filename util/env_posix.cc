@@ -91,7 +91,7 @@ class Limiter {
   void operator=(const Limiter&);
 };
 
-//假设file_已被打开open。
+//假设file_已被打开open。顺序读文件用fread
 class PosixSequentialFile: public SequentialFile {
  private:
   std::string filename_;
@@ -137,10 +137,10 @@ class PosixSequentialFile: public SequentialFile {
   }
 };
 
-// pread() based random-access
+// pread() based random-access。随机读文件封装
 class PosixRandomAccessFile: public RandomAccessFile {
  private:
-  std::string filename_;
+  std::string filename_; 
   bool temporary_fd_;  // If true, fd_ is -1 and we open on every read.
   int fd_;
   Limiter* limiter_;
