@@ -680,11 +680,14 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
 
   // If the queue is currently empty, the background thread may currently be
   // waiting.
+  
+  //???这里为啥不先push_back,然后再cond_signal，而是新cond_signal然后再push_back呢？？？
   if (queue_.empty()) {
     PthreadCall("signal", pthread_cond_signal(&bgsignal_));
   }
 
   // Add to priority queue
+  //此时hold住了mutex，可以直接塞进queue_里
   queue_.push_back(BGItem());
   queue_.back().function = function;
   queue_.back().arg = arg;
@@ -706,6 +709,7 @@ void PosixEnv::BGThread() {
     queue_.pop_front();
 
     PthreadCall("unlock", pthread_mutex_unlock(&mu_));
+    //在mutex外面执行函数，防止阻塞住锁
     (*function)(arg);
   }
 }
@@ -747,7 +751,8 @@ void EnvPosixTestHelper::SetReadOnlyMMapLimit(int limit) {
   assert(default_env == NULL);
   mmap_limit = limit;
 }
-
+  
+//用pthread_once来实现单例模式！
 Env* Env::Default() {
   pthread_once(&once, InitDefaultEnv);
   return default_env;
