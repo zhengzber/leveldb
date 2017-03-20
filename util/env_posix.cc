@@ -42,6 +42,7 @@ static Status IOError(const std::string& context, int err_number) {
 // Currently used to limit read-only file descriptors and mmap file usage
 // so that we do not end up running out of file descriptors, virtual memory,
 // or running into kernel performance problems for very large databases.
+//一个资源上线抽象类，包含锁，每次拿1个资源则减1，释放1个资源则增1
 class Limiter {
  public:
   // Limit maximum number of resources to |n|.
@@ -51,6 +52,7 @@ class Limiter {
 
   // If another resource is available, acquire it and return true.
   // Else return false.
+  //每次拿去1个资源，然后递减1个资源
   bool Acquire() {
     if (GetAllowed() <= 0) {
       return false;
@@ -67,6 +69,7 @@ class Limiter {
 
   // Release a resource acquired by a previous call to Acquire() that returned
   // true.
+  //释放资源后，递增
   void Release() {
     MutexLock l(&mu_);
     SetAllowed(GetAllowed() + 1);
@@ -74,8 +77,7 @@ class Limiter {
 
  private:
   port::Mutex mu_;
-  port::AtomicPointer allowed_;
-
+  port::AtomicPointer allowed_; //允许的资源量，每次拿出去后减1
   intptr_t GetAllowed() const {
     return reinterpret_cast<intptr_t>(allowed_.Acquire_Load());
   }
@@ -89,6 +91,7 @@ class Limiter {
   void operator=(const Limiter&);
 };
 
+//假设file_已被打开open。
 class PosixSequentialFile: public SequentialFile {
  private:
   std::string filename_;
@@ -99,10 +102,21 @@ class PosixSequentialFile: public SequentialFile {
       : filename_(fname), file_(f) { }
   virtual ~PosixSequentialFile() { fclose(file_); }
 
+  //
   virtual Status Read(size_t n, Slice* result, char* scratch) {
     Status s;
+    /*
+    size_t fread_unlocked(void* buffer, size_t size, size_t itemcount, FILE* stream)
+    buffer: supplies a pointer to the buffer where the data will be returned.
+    size: supplies the size of each element to read
+    itemcount: supplies the number of elements to read
+    */
+    //尝试从file_1中读n个字节并放到scratch中
+    //fread_unlocked表示内部不会存在多个线程来读取这个文件.可以在一定程度上提高性能.
     size_t r = fread_unlocked(scratch, 1, n, file_);
+    //用result来指向scratch的数据
     *result = Slice(scratch, r);
+    //如果读出来的数据少于n，如果遇到文件末尾了那么ok，否则这个部分读遇到错误了
     if (r < n) {
       if (feof(file_)) {
         // We leave status as ok if we hit the end of the file
@@ -114,6 +128,7 @@ class PosixSequentialFile: public SequentialFile {
     return s;
   }
 
+  //调用fseek来set the file position indicator，即移动file_的游标
   virtual Status Skip(uint64_t n) {
     if (fseek(file_, n, SEEK_CUR)) {
       return IOError(filename_, errno);
