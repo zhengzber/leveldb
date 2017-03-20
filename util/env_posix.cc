@@ -549,6 +549,7 @@ class PosixEnv : public Env {
 
   virtual void StartThread(void (*function)(void* arg), void* arg);
 
+  //将当前uid作为一部分写入文件路径中，然后创建出目录
   virtual Status GetTestDirectory(std::string* result) {
     const char* env = getenv("TEST_TMPDIR");
     if (env && env[0] != '\0') {
@@ -563,6 +564,7 @@ class PosixEnv : public Env {
     return Status::OK();
   }
 
+  //获得当前tid，会得到tid，然后将tid的8字节内容拷贝到uint64_t中返回
   static uint64_t gettid() {
     pthread_t tid = pthread_self();
     uint64_t thread_id = 0;
@@ -581,17 +583,20 @@ class PosixEnv : public Env {
     }
   }
 
+  //调用gettimeofday获得时间，返回us
   virtual uint64_t NowMicros() {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return static_cast<uint64_t>(tv.tv_sec) * 1000000 + tv.tv_usec;
   }
 
+  //调用usleep睡眠
   virtual void SleepForMicroseconds(int micros) {
     usleep(micros);
   }
 
  private:
+  //如果result不是0，那么直接abort,用来处理系统调用的返回值
   void PthreadCall(const char* label, int result) {
     if (result != 0) {
       fprintf(stderr, "pthread %s: %s\n", label, strerror(result));
@@ -622,6 +627,7 @@ class PosixEnv : public Env {
 };
 
 // Return the maximum number of concurrent mmaps.
+//最多能mmap 1000次
 static int MaxMmaps() {
   if (mmap_limit >= 0) {
     return mmap_limit;
@@ -632,6 +638,7 @@ static int MaxMmaps() {
 }
 
 // Return the maximum number of read-only files to keep open.
+//获得系统参数
 static intptr_t MaxOpenFiles() {
   if (open_read_only_file_limit >= 0) {
     return open_read_only_file_limit;
@@ -649,6 +656,7 @@ static intptr_t MaxOpenFiles() {
   return open_read_only_file_limit;
 }
 
+//初始化mutex和条件变量
 PosixEnv::PosixEnv()
     : started_bgthread_(false),
       mmap_limit_(MaxMmaps()),
@@ -657,10 +665,12 @@ PosixEnv::PosixEnv()
   PthreadCall("cvar_init", pthread_cond_init(&bgsignal_, NULL));
 }
 
+//首先加锁，然后创建一个背景线程去执行
 void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   PthreadCall("lock", pthread_mutex_lock(&mu_));
 
   // Start background thread if necessary
+  //如果还没创建出背景线程，那么创建出一个线程
   if (!started_bgthread_) {
     started_bgthread_ = true;
     PthreadCall(
@@ -681,7 +691,8 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
 
   PthreadCall("unlock", pthread_mutex_unlock(&mu_));
 }
-
+  
+//线程执行函数，用条件变量等待在队列中，醒来后从队列中拿出一个task然后执行  
 void PosixEnv::BGThread() {
   while (true) {
     // Wait until there is an item that is ready to run
