@@ -137,7 +137,9 @@ class PosixSequentialFile: public SequentialFile {
   }
 };
 
-// pread() based random-access。随机读文件封装
+// pread() based random-access。
+//基于文件操作，随机读文件封装。提供从offset处读取n个字节的接口。
+//如果资源不足，那么每次读取都打开文件一次，读完再关闭。
 class PosixRandomAccessFile: public RandomAccessFile {
  private:
   std::string filename_; 
@@ -149,6 +151,7 @@ class PosixRandomAccessFile: public RandomAccessFile {
   PosixRandomAccessFile(const std::string& fname, int fd, Limiter* limiter)
       : filename_(fname), fd_(fd), limiter_(limiter) {
     temporary_fd_ = !limiter->Acquire();
+    //如果获取资源失败，那么每次access都open file
     if (temporary_fd_) {
       // Open file on every access.
       close(fd_);
@@ -174,8 +177,11 @@ class PosixRandomAccessFile: public RandomAccessFile {
     }
 
     Status s;
+    //reads up to n bytes from fd at offset offset。从offset开始读n个字节
     ssize_t r = pread(fd, scratch, n, static_cast<off_t>(offset));
+    //将result指向scratch
     *result = Slice(scratch, (r < 0) ? 0 : r);
+    //如果负则读取失败
     if (r < 0) {
       // An error: return a non-ok status
       s = IOError(filename_, errno);
@@ -189,11 +195,13 @@ class PosixRandomAccessFile: public RandomAccessFile {
 };
 
 // mmap() based random-access
+//基于内存映射随机访问文件
+//将文件映射到内存中，然后从内存起始地址+offset读出n个字节
 class PosixMmapReadableFile: public RandomAccessFile {
  private:
   std::string filename_;
-  void* mmapped_region_;
-  size_t length_;
+  void* mmapped_region_; //文件映射到内存后的内存起始地址
+  size_t length_; //内存映射区域的长度（即文件的大小）
   Limiter* limiter_;
 
  public:
@@ -212,16 +220,19 @@ class PosixMmapReadableFile: public RandomAccessFile {
   virtual Status Read(uint64_t offset, size_t n, Slice* result,
                       char* scratch) const {
     Status s;
+    //如果文件大小不够的话直接返回错误？
     if (offset + n > length_) {
       *result = Slice();
       s = IOError(filename_, EINVAL);
     } else {
+      //将result指向内存映射的起始地址+offset，大小为n
       *result = Slice(reinterpret_cast<char*>(mmapped_region_) + offset, n);
     }
     return s;
   }
 };
 
+//基于文件操作的可写文件
 class PosixWritableFile : public WritableFile {
  private:
   std::string filename_;
@@ -238,6 +249,7 @@ class PosixWritableFile : public WritableFile {
     }
   }
 
+  //用fwrite向文件中写数据
   virtual Status Append(const Slice& data) {
     size_t r = fwrite_unlocked(data.data(), 1, data.size(), file_);
     if (r != data.size()) {
@@ -246,6 +258,7 @@ class PosixWritableFile : public WritableFile {
     return Status::OK();
   }
 
+  //用fclose关闭文件
   virtual Status Close() {
     Status result;
     if (fclose(file_) != 0) {
@@ -255,6 +268,7 @@ class PosixWritableFile : public WritableFile {
     return result;
   }
 
+  //调用fflush来刷新文件流
   virtual Status Flush() {
     if (fflush_unlocked(file_) != 0) {
       return IOError(filename_, errno);
@@ -303,6 +317,7 @@ class PosixWritableFile : public WritableFile {
   }
 };
 
+//使用文件锁对整个文件进行加锁或解锁。lock==true：加锁；否则解锁
 static int LockOrUnlock(int fd, bool lock) {
   errno = 0;
   struct flock f;
@@ -314,6 +329,8 @@ static int LockOrUnlock(int fd, bool lock) {
   return fcntl(fd, F_SETLK, &f);
 }
 
+//文件锁，包括成员文件名和fd
+//基本上PosixFileLock没有任何内容，里面只需要维护fd即可。然后在LockOrUnlock里面操作fd即可以加锁解锁 
 class PosixFileLock : public FileLock {
  public:
   int fd_;
@@ -323,6 +340,7 @@ class PosixFileLock : public FileLock {
 // Set of locked files.  We keep a separate set instead of just
 // relying on fcntrl(F_SETLK) since fcntl(F_SETLK) does not provide
 // any protection against multiple uses from the same process.
+//维护一组加锁的文件名，包括一个mutex来对一组set进行保护操作
 class PosixLockTable {
  private:
   port::Mutex mu_;
@@ -338,6 +356,7 @@ class PosixLockTable {
   }
 };
 
+//是Env接口的实现
 class PosixEnv : public Env {
  public:
   PosixEnv();
@@ -347,6 +366,7 @@ class PosixEnv : public Env {
     abort();
   }
 
+  //以只读访问打开文件fname,然后返回PosixSequentialFile（它提供顺序读和skip的接口）
   virtual Status NewSequentialFile(const std::string& fname,
                                    SequentialFile** result) {
     FILE* f = fopen(fname.c_str(), "r");
@@ -363,10 +383,12 @@ class PosixEnv : public Env {
                                      RandomAccessFile** result) {
     *result = NULL;
     Status s;
+    //先打开一个文件
     int fd = open(fname.c_str(), O_RDONLY);
     if (fd < 0) {
       s = IOError(fname, errno);
     } else if (mmap_limit_.Acquire()) {
+      //尝试将文件映射到内存中，如果映射到内存成功，然后返回PosixMmapReadableFile(提供随机读接口，即从内存中读)
       uint64_t size;
       s = GetFileSize(fname, &size);
       if (s.ok()) {
@@ -382,11 +404,13 @@ class PosixEnv : public Env {
         mmap_limit_.Release();
       }
     } else {
+      //如果内存映射未成功，返回PosixRandomAccessFile(提供随机读接口，用pread接口读磁盘)
       *result = new PosixRandomAccessFile(fname, fd, &fd_limit_);
     }
     return s;
   }
 
+  //打开文件（可写文件模式打开），然后返回可写文件接口（用pwrite来写）
   virtual Status NewWritableFile(const std::string& fname,
                                  WritableFile** result) {
     Status s;
@@ -400,6 +424,7 @@ class PosixEnv : public Env {
     return s;
   }
 
+  //打开文件（追加文件模式打开），然后返回可写文件接口（用pwrite来写）
   virtual Status NewAppendableFile(const std::string& fname,
                                    WritableFile** result) {
     Status s;
@@ -413,10 +438,12 @@ class PosixEnv : public Env {
     return s;
   }
 
+  //调用access(pathname, mode)接口来check whether the process would be allowed to read, write, or test for existence of the file
   virtual bool FileExists(const std::string& fname) {
     return access(fname.c_str(), F_OK) == 0;
   }
 
+  //调用readdir来获得目录下所有文件
   virtual Status GetChildren(const std::string& dir,
                              std::vector<std::string>* result) {
     result->clear();
@@ -432,6 +459,8 @@ class PosixEnv : public Env {
     return Status::OK();
   }
 
+  //调用unlink来删除文件：unlink deletes a name from the filesystem, if that name was the last link to a file and no
+  // processes have the file open the file is deleted and the space it was using is made available for reuse.
   virtual Status DeleteFile(const std::string& fname) {
     Status result;
     if (unlink(fname.c_str()) != 0) {
@@ -440,6 +469,7 @@ class PosixEnv : public Env {
     return result;
   }
 
+  //调用mkdir来创建目录，权限是755
   virtual Status CreateDir(const std::string& name) {
     Status result;
     if (mkdir(name.c_str(), 0755) != 0) {
@@ -448,6 +478,7 @@ class PosixEnv : public Env {
     return result;
   }
 
+  //调用rmdir来删除目录
   virtual Status DeleteDir(const std::string& name) {
     Status result;
     if (rmdir(name.c_str()) != 0) {
@@ -456,6 +487,7 @@ class PosixEnv : public Env {
     return result;
   }
 
+  //调用stat来获得文件属性参数
   virtual Status GetFileSize(const std::string& fname, uint64_t* size) {
     Status s;
     struct stat sbuf;
@@ -468,6 +500,7 @@ class PosixEnv : public Env {
     return s;
   }
 
+  //调用rename来改文件名
   virtual Status RenameFile(const std::string& src, const std::string& target) {
     Status result;
     if (rename(src.c_str(), target.c_str()) != 0) {
@@ -476,6 +509,7 @@ class PosixEnv : public Env {
     return result;
   }
 
+  //尝试锁住文件，创建出PosixFileLock并赋值给lock。并且插入到locks_中（如果locks_中已存在该文件，说明被lock了，直接返回错误）。
   virtual Status LockFile(const std::string& fname, FileLock** lock) {
     *lock = NULL;
     Status result;
@@ -498,6 +532,7 @@ class PosixEnv : public Env {
     return result;
   }
 
+  //解锁文件，从locks_中移除，并且delete参数
   virtual Status UnlockFile(FileLock* lock) {
     PosixFileLock* my_lock = reinterpret_cast<PosixFileLock*>(lock);
     Status result;
