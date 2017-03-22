@@ -194,28 +194,31 @@ class LRUCache {
   bool FinishErase(LRUHandle* e);
 
   // Initialized before use.
-  size_t capacity_; //usage_的最大值
+  size_t capacity_; //双向链表的存储容量，由各个节点的charge累加
   
   // mutex_ protects the following state.
   mutable port::Mutex mutex_;//对于多线程有效
-  size_t usage_; //当前使用大小
+  size_t usage_; //当前使用空间
   
   // Dummy head of LRU list.
   // lru.prev is newest entry, lru.next is oldest entry.
   // Entries have refs==1 and in_cache==true.
-  LRUHandle lru_; //LRU链.
+  LRUHandle lru_; //LRU链.双向循环链表的傀儡节点，不存储数据，方便定位这个链表的入口
+  //ru之前(prev)的节点都是最新的节点，lru之后的节点(next)都是最“旧”的节点，所以插入新节点时，
+  //就往lru.prev插入.当空间不够时，删除lru.next后的节点
 
 
   // Dummy head of in-use list.
   // Entries are in use by clients, and have refs >= 2 and in_cache==true.
-  LRUHandle in_use_;
-
-  HandleTable table_; //LRUHandle的管理对象表(hashtable)
+  LRUHandle in_use_; //in-user链表的头节点
+  
+  HandleTable table_; //上面的哈希表，一个双向链表还附带一个哈希表
 };
 
 LRUCache::LRUCache()
     : usage_(0) {
   // Make empty circular linked lists.
+  //空的循环链表，头节点指向自己
   lru_.next = &lru_;
   lru_.prev = &lru_;
   in_use_.next = &in_use_;
@@ -235,6 +238,7 @@ LRUCache::~LRUCache() {
 }
 
 void LRUCache::Ref(LRUHandle* e) {
+  //从lru链表中移除，放入in_use链表中
   if (e->refs == 1 && e->in_cache) {  // If on lru_ list, move to in_use_ list.
     LRU_Remove(e);
     LRU_Append(&in_use_, e);
@@ -245,21 +249,25 @@ void LRUCache::Ref(LRUHandle* e) {
 void LRUCache::Unref(LRUHandle* e) {
   assert(e->refs > 0);
   e->refs--;
+  //如果当前引用计数为0，那么调用注册的释放函数来删除节点
   if (e->refs == 0) { // Deallocate.
     assert(!e->in_cache);
     (*e->deleter)(e->key(), e->value);
     free(e);
   } else if (e->in_cache && e->refs == 1) {  // No longer in use; move to lru_ list.
+    //解除e节点在双向链表中的位置，放入lru链表中
     LRU_Remove(e);
     LRU_Append(&lru_, e);
   }
 }
 
+//把这个节点从双向链表中解除关系，不负责释放e节点
 void LRUCache::LRU_Remove(LRUHandle* e) {
   e->next->prev = e->prev;
   e->prev->next = e->next;
 }
 
+//将e节点插入到ist节点前面
 void LRUCache::LRU_Append(LRUHandle* list, LRUHandle* e) {
   // Make "e" newest entry by inserting just before *list
   e->next = list;
@@ -268,6 +276,7 @@ void LRUCache::LRU_Append(LRUHandle* list, LRUHandle* e) {
   e->next->prev = e;
 }
 
+//如果从哈希表中找到该节点，那么增加他的引用计数（会从lru中移除，放入in_use中），返回该节点
 Cache::Handle* LRUCache::Lookup(const Slice& key, uint32_t hash) {
   MutexLock l(&mutex_);
   LRUHandle* e = table_.Lookup(key, hash);
@@ -276,7 +285,8 @@ Cache::Handle* LRUCache::Lookup(const Slice& key, uint32_t hash) {
   }
   return reinterpret_cast<Cache::Handle*>(e);
 }
-
+  
+//解引用该节点（引用计数会--）
 void LRUCache::Release(Cache::Handle* handle) {
   MutexLock l(&mutex_);
   Unref(reinterpret_cast<LRUHandle*>(handle));
@@ -287,6 +297,7 @@ Cache::Handle* LRUCache::Insert(
     void (*deleter)(const Slice& key, void* value)) {
   MutexLock l(&mutex_);
 
+  //分配一个节点先
   LRUHandle* e = reinterpret_cast<LRUHandle*>(
       malloc(sizeof(LRUHandle)-1 + key.size())); //因为char key_data[1]已经拥有了一个char，所以这里可以少分配一个字节
   e->value = value;
@@ -301,12 +312,14 @@ Cache::Handle* LRUCache::Insert(
   if (capacity_ > 0) {
     e->refs++;  // for the cache's reference.
     e->in_cache = true;
+    //放入in_use链表中
     LRU_Append(&in_use_, e);
     usage_ += charge;
     FinishErase(table_.Insert(e));
   } // else don't cache.  (Tests use capacity_==0 to turn off caching.)
 
   //淘汰出一个
+  //从lru节点中淘汰一个
   while (usage_ > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
     assert(old->refs == 1);
