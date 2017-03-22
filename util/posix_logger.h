@@ -16,6 +16,7 @@
 
 namespace leveldb {
 
+//一个简单实现的log，注意技巧！
 class PosixLogger : public Logger {
  private:
   FILE* file_;
@@ -30,10 +31,12 @@ class PosixLogger : public Logger {
 
     // We try twice: the first time with a fixed-size stack allocated buffer,
     // and the second time with a much larger dynamically allocated buffer.
+    //这个地方很赞，第一次使用栈上内存，第二次使用heap内存
     char buffer[500];
     for (int iter = 0; iter < 2; iter++) {
       char* base;
       int bufsize;
+      //第一次使用stack内存。500字节
       if (iter == 0) {
         bufsize = sizeof(buffer);
         base = buffer;
@@ -49,7 +52,7 @@ class PosixLogger : public Logger {
       const time_t seconds = now_tv.tv_sec;
       struct tm t;
       localtime_r(&seconds, &t);
-      p += snprintf(p, limit - p,
+      p += snprintf(p, limit - p, //本地时间+microseconds 线程号 自定义格式.
                     "%04d/%02d/%02d-%02d:%02d:%02d.%06d %llx ",
                     t.tm_year + 1900,
                     t.tm_mon + 1,
@@ -69,22 +72,25 @@ class PosixLogger : public Logger {
       }
 
       // Truncate to available space if necessary
+      //如果超过了内存，并且是第一轮的话那么重新来一轮
       if (p >= limit) {
         if (iter == 0) {
           continue;       // Try again with larger buffer
         } else {
-          p = limit - 1;
+          p = limit - 1; //如果是第二轮的话，进行截断
         }
       }
 
       // Add newline if necessary
+      //确保存在换行
       if (p == base || p[-1] != '\n') {
         *p++ = '\n';
       }
 
       assert(p <= limit);
-      fwrite(base, 1, p - base, file_);
-      fflush(file_);
+      fwrite(base, 1, p - base, file_);//将内容写入文件
+      fflush(file_); //这里fflush文件
+      //如果不是使用栈上内存，那么使用堆上内存，需要释放下内存
       if (base != buffer) {
         delete[] base;
       }
