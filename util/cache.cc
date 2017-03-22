@@ -40,21 +40,22 @@ namespace {
 // An entry is a variable length heap-allocated structure.  Entries
 // are kept in a circular doubly linked list ordered by access time.
 struct LRUHandle {
-  void* value;
-  void (*deleter)(const Slice&, void* value);
-  LRUHandle* next_hash;
-  LRUHandle* next;
-  LRUHandle* prev;
-  size_t charge;      // TODO(opt): Only allow uint32_t?
-  size_t key_length;
+  void* value; //键值对的值
+  void (*deleter)(const Slice&, void* value); //这个结构体的清除函数，由外界传进去注册
+  LRUHandle* next_hash; //用于hash表冲突时使用，在哈希表中，指向哈希数组的链表中的下一个节点指针
+  LRUHandle* next; //当前节点的下一个节点
+  LRUHandle* prev; //当前节点的上一个节点
+  size_t charge;      // TODO(opt): Only allow uint32_t? 这个节点占用的内存大小
+  size_t key_length; //这个键的长度
   bool in_cache;      // Whether entry is in the cache.
-  uint32_t refs;      // References, including cache reference, if present.
-  uint32_t hash;      // Hash of key(); used for fast sharding and comparisons
-  char key_data[1];   // Beginning of key
-
+  uint32_t refs;      // References, including cache reference, if present.这个节点引用次数，当引用次数为0时，即可删除
+  uint32_t hash;      // Hash of key(); used for fast sharding and comparisons。这个键的哈希值
+  char key_data[1];   // Beginning of key.存储键的字符串，也是C++柔性数组的概念（申请内存时可少申请一个字节）
+  
   Slice key() const {
     // For cheaper lookups, we allow a temporary Handle object
     // to store a pointer to a key in "value".
+    //为了加速查询，有时候将key存放在valu中（当前节点的next指向自己时）
     if (next == this) {
       return *(reinterpret_cast<Slice*>(value));
     } else {
@@ -70,6 +71,8 @@ struct LRUHandle {
 // 4.4.3's builtin hashtable.
 class HandleTable {
  public:
+  //先是对成员初始化，然后调用Resize()，因为一开始没有哈希表，所以先给哈希表分配存储空间。
+  //第一次分配时，哈希数组长度为4，当后面元素数量大于哈希表长度时，再次分配哈希表大小为现在数组长度的2倍。 
   HandleTable() : length_(0), elems_(0), list_(NULL) { Resize(); }
   ~HandleTable() { delete[] list_; }
 
@@ -106,13 +109,14 @@ class HandleTable {
  private:
   // The table consists of an array of buckets where each bucket is
   // a linked list of cache entries that hash into the bucket.
-  uint32_t length_;
-  uint32_t elems_;
-  LRUHandle** list_;
-
+  uint32_t length_; //哈希数组的长度
+  uint32_t elems_; //哈希数组存储元素的数量
+  LRUHandle** list_; //哈希数组指针，因为数组里的元素是指针，所以类型是指针的指针
+  
   // Return a pointer to slot that points to a cache entry that
   // matches key/hash.  If there is no such cache entry, return a
   // pointer to the trailing slot in the corresponding linked list.
+  //在哈希表中，根据key和hash来找到LRUHandle*。找到一个节点它的key等参数key，或者hash等于参数hash然后返回
   LRUHandle** FindPointer(const Slice& key, uint32_t hash) {
     LRUHandle** ptr = &list_[hash & (length_ - 1)];
     while (*ptr != NULL &&
@@ -124,32 +128,36 @@ class HandleTable {
 
   void Resize() {
     uint32_t new_length = 4;
+    //初始时数组有4个元素，然后进行resize翻倍直到大于elems_
     while (new_length < elems_) {
       new_length *= 2;
     }
-    LRUHandle** new_list = new LRUHandle*[new_length];
-    memset(new_list, 0, sizeof(new_list[0]) * new_length);
+    
+    //改变数组大小后，需要对原来的元素做rehash
+    LRUHandle** new_list = new LRUHandle*[new_length]; //给哈希数组分配空间
+    memset(new_list, 0, sizeof(new_list[0]) * new_length);//初始全为0
     uint32_t count = 0;
     for (uint32_t i = 0; i < length_; i++) {
-      LRUHandle* h = list_[i];
+      LRUHandle* h = list_[i]; //h为数组slot(i)的元素
       while (h != NULL) {
-        LRUHandle* next = h->next_hash;
-        uint32_t hash = h->hash;
-        LRUHandle** ptr = &new_list[hash & (new_length - 1)];
-        h->next_hash = *ptr;
-        *ptr = h;
-        h = next;
-        count++;
+        LRUHandle* next = h->next_hash; //当前节点的下一个节点
+        uint32_t hash = h->hash; //当前节点的hash值
+        LRUHandle** ptr = &new_list[hash & (new_length - 1)];//当前节点在新哈希数组的索引位置
+        h->next_hash = *ptr;//头插入，将当前节点插入哈希数组的头部位置
+        *ptr = h; //调整哈希数组的头部位置
+        h = next;//处理当前slot的下一个元素
+        count++; //处理完一个元素后递增
       }
     }
-    assert(elems_ == count);
-    delete[] list_;
+    assert(elems_ == count); //rehash处理的元素个数应该等于以前哈希表的元素个数
+    delete[] list_; //删除老的哈希数组
     list_ = new_list;
     length_ = new_length;
   }
 };
 
 // A single shard of sharded cache.
+//按照LRU来实现的
 class LRUCache {
  public:
   LRUCache();
@@ -179,22 +187,23 @@ class LRUCache {
   bool FinishErase(LRUHandle* e);
 
   // Initialized before use.
-  size_t capacity_;
-
+  size_t capacity_; //usage_的最大值
+  
   // mutex_ protects the following state.
-  mutable port::Mutex mutex_;
-  size_t usage_;
-
+  mutable port::Mutex mutex_;//对于多线程有效
+  size_t usage_; //当前使用大小
+  
   // Dummy head of LRU list.
   // lru.prev is newest entry, lru.next is oldest entry.
   // Entries have refs==1 and in_cache==true.
-  LRUHandle lru_;
+  LRUHandle lru_; //LRU链.
+
 
   // Dummy head of in-use list.
   // Entries are in use by clients, and have refs >= 2 and in_cache==true.
   LRUHandle in_use_;
 
-  HandleTable table_;
+  HandleTable table_; //LRUHandle的管理对象表(hashtable)
 };
 
 LRUCache::LRUCache()
@@ -272,12 +281,12 @@ Cache::Handle* LRUCache::Insert(
   MutexLock l(&mutex_);
 
   LRUHandle* e = reinterpret_cast<LRUHandle*>(
-      malloc(sizeof(LRUHandle)-1 + key.size()));
+      malloc(sizeof(LRUHandle)-1 + key.size())); //因为char key_data[1]已经拥有了一个char，所以这里可以少分配一个字节
   e->value = value;
-  e->deleter = deleter;
-  e->charge = charge;
-  e->key_length = key.size();
-  e->hash = hash;
+  e->deleter = deleter; //删除函数
+  e->charge = charge; //占用大小
+  e->key_length = key.size(); //key
+  e->hash = hash; // hash
   e->in_cache = false;
   e->refs = 1;  // for the returned handle.
   memcpy(e->key_data, key.data(), key.size());
@@ -290,6 +299,7 @@ Cache::Handle* LRUCache::Insert(
     FinishErase(table_.Insert(e));
   } // else don't cache.  (Tests use capacity_==0 to turn off caching.)
 
+  //淘汰出一个
   while (usage_ > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
     assert(old->refs == 1);
@@ -335,9 +345,10 @@ void LRUCache::Prune() {
 static const int kNumShardBits = 4;
 static const int kNumShards = 1 << kNumShardBits;
 
+//shared表示会将请求进行load-balance
 class ShardedLRUCache : public Cache {
  private:
-  LRUCache shard_[kNumShards];
+  LRUCache shard_[kNumShards]; //有16个slot
   port::Mutex id_mutex_;
   uint64_t last_id_;
 
@@ -345,11 +356,13 @@ class ShardedLRUCache : public Cache {
     return Hash(s.data(), s.size(), 0);
   }
 
+  //取hash结果的高4位作为slot的index
   static uint32_t Shard(uint32_t hash) {
     return hash >> (32 - kNumShardBits);
   }
 
  public:
+  //对每个slot的capacity进行均分
   explicit ShardedLRUCache(size_t capacity)
       : last_id_(0) {
     const size_t per_shard = (capacity + (kNumShards - 1)) / kNumShards;
