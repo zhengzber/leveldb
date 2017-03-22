@@ -617,6 +617,7 @@ class PosixEnv : public Env {
   bool started_bgthread_;
 
   // Entry per Schedule() call
+  //function+arg，还是比较通用的，不过现在可以用boost::function来代替这个
   struct BGItem { void* arg; void (*function)(void*); };
   typedef std::deque<BGItem> BGQueue;
   BGQueue queue_;
@@ -666,6 +667,8 @@ PosixEnv::PosixEnv()
 }
 
 //首先加锁，然后创建一个背景线程去执行
+//Schedule语义就是将一个function+arg丢到background里面运行.background线程是惰性初始化的. 
+//注意background只有一个执行线程，需要考虑工作是否会阻塞住。
 void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   PthreadCall("lock", pthread_mutex_lock(&mu_));
 
@@ -675,7 +678,7 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
     started_bgthread_ = true;
     PthreadCall(
         "create thread",
-        pthread_create(&bgthread_, NULL,  &PosixEnv::BGThreadWrapper, this));
+        pthread_create(&bgthread_, NULL,  &PosixEnv::BGThreadWrapper, this));//创建线程
   }
 
   // If the queue is currently empty, the background thread may currently be
@@ -683,11 +686,11 @@ void PosixEnv::Schedule(void (*function)(void*), void* arg) {
   
   //???这里为啥不先push_back,然后再cond_signal，而是新cond_signal然后再push_back呢？？？
   if (queue_.empty()) {
-    PthreadCall("signal", pthread_cond_signal(&bgsignal_));
+    PthreadCall("signal", pthread_cond_signal(&bgsignal_));//通知队列
   }
 
   // Add to priority queue
-  //此时hold住了mutex，可以直接塞进queue_里
+  //此时hold住了mutex，可以直接塞进queue_里。在队列内部加入对象
   queue_.push_back(BGItem());
   queue_.back().function = function;
   queue_.back().arg = arg;
@@ -752,7 +755,7 @@ void EnvPosixTestHelper::SetReadOnlyMMapLimit(int limit) {
   mmap_limit = limit;
 }
   
-//用pthread_once来实现单例模式！
+//用pthread_once来实现单例模式。获得Env的一个实例
 Env* Env::Default() {
   pthread_once(&once, InitDefaultEnv);
   return default_env;
