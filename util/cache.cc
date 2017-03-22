@@ -80,13 +80,19 @@ class HandleTable {
     return *FindPointer(key, hash);
   }
 
+  //如果ptr不为空，那么h放在ptr的后面；如果为空，那么h放在*ptr的位置
+  //插入操作,先查找要插入的键值是否在哈希表中，如果在，那么用新的节点替换就的节点，并且函数返回旧的节点。
   LRUHandle* Insert(LRUHandle* h) {
-    LRUHandle** ptr = FindPointer(h->key(), h->hash);
+    LRUHandle** ptr = FindPointer(h->key(), h->hash); //查找要插入节点的位置
     LRUHandle* old = *ptr;
+    //将新节点插入哈希表中
     h->next_hash = (old == NULL ? NULL : old->next_hash);
     *ptr = h;
     if (old == NULL) {
+      //此时不存在相等的节点，元素个数++
       ++elems_;
+      //如果存储元素的数量大于slot个数了，那么肯定有冲突了，
+      //为了保证哈希链的查找速度，尽量使平均哈希链长度为<=1。所以函数有if判断。
       if (elems_ > length_) {
         // Since each cache entry is fairly large, we aim for a small
         // average linked list length (<= 1).
@@ -97,10 +103,10 @@ class HandleTable {
   }
 
   LRUHandle* Remove(const Slice& key, uint32_t hash) {
-    LRUHandle** ptr = FindPointer(key, hash);
-    LRUHandle* result = *ptr;
+    LRUHandle** ptr = FindPointer(key, hash);//查找要删除的节点位置
+    LRUHandle* result = *ptr;//把要删除的节点地址赋值给result
     if (result != NULL) {
-      *ptr = result->next_hash;
+      *ptr = result->next_hash;//删除节点的位置赋值给删除节点的下一个节点
       --elems_;
     }
     return result;
@@ -109,7 +115,7 @@ class HandleTable {
  private:
   // The table consists of an array of buckets where each bucket is
   // a linked list of cache entries that hash into the bucket.
-  uint32_t length_; //哈希数组的长度
+  uint32_t length_; //哈希数组的长度，即slot个数
   uint32_t elems_; //哈希数组存储元素的数量
   LRUHandle** list_; //哈希数组指针，因为数组里的元素是指针，所以类型是指针的指针
   
@@ -117,6 +123,7 @@ class HandleTable {
   // matches key/hash.  If there is no such cache entry, return a
   // pointer to the trailing slot in the corresponding linked list.
   //在哈希表中，根据key和hash来找到LRUHandle*。找到一个节点它的key等参数key，或者hash等于参数hash然后返回
+  //如果没找到的话，那么返回的是*ptr=NULL,这个ptr指向的是哈希数组的slot链表中的最后一个节点的下个NULL节点，可作为insert节点使用
   LRUHandle** FindPointer(const Slice& key, uint32_t hash) {
     LRUHandle** ptr = &list_[hash & (length_ - 1)];
     while (*ptr != NULL &&
