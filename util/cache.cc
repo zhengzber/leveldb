@@ -39,6 +39,9 @@ namespace {
 
 // An entry is a variable length heap-allocated structure.  Entries
 // are kept in a circular doubly linked list ordered by access time.
+ 
+ 
+  
 struct LRUHandle {
   void* value; //键值对的值
   void (*deleter)(const Slice&, void* value); //这个结构体的清除函数，由外界传进去注册
@@ -165,6 +168,8 @@ class HandleTable {
 
 // A single shard of sharded cache.
 //按照LRU来实现的
+//一个节点要么在in-use双向链表中；要么在lru双向链表中。在in-use链表中的节点当前正在被client所使用（ref至少为2，一个为
+//in-use拿着一个为client拿着）
 class LRUCache {
  public:
   LRUCache();
