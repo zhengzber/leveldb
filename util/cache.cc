@@ -339,6 +339,7 @@ Cache::Handle* LRUCache::Insert(
 
 
   //从lru链表中移除旧节点(lru->next指向的节点)，同时从hash table中移除
+  //这里体现了LRU的思想：当容量超了时，会先淘汰旧的节点！
   while (usage_ > capacity_ && lru_.next != &lru_) {
     LRUHandle* old = lru_.next;
     assert(old->refs == 1);
@@ -390,10 +391,11 @@ static const int kNumShards = 1 << kNumShardBits;
 //shared表示会将请求进行load-balance
 class ShardedLRUCache : public Cache {
  private:
-  LRUCache shard_[kNumShards]; //有16个slot
+  LRUCache shard_[kNumShards]; //有16个LRUCache,会根据hash来load balance
   port::Mutex id_mutex_;
   uint64_t last_id_;
 
+  //获得哈希值
   static inline uint32_t HashSlice(const Slice& s) {
     return Hash(s.data(), s.size(), 0);
   }
@@ -413,15 +415,18 @@ class ShardedLRUCache : public Cache {
     }
   }
   virtual ~ShardedLRUCache() { }
+  //将数据hash到相应slot的LRUCache，然后去插入数据
   virtual Handle* Insert(const Slice& key, void* value, size_t charge,
                          void (*deleter)(const Slice& key, void* value)) {
     const uint32_t hash = HashSlice(key);
     return shard_[Shard(hash)].Insert(key, hash, value, charge, deleter);
   }
+  //将数据hash到相应slot的LRUCache，然后去查找数据
   virtual Handle* Lookup(const Slice& key) {
     const uint32_t hash = HashSlice(key);
     return shard_[Shard(hash)].Lookup(key, hash);
   }
+ //将数据hash到相应slot的LRUCache，然后去删除数据
   virtual void Release(Handle* handle) {
     LRUHandle* h = reinterpret_cast<LRUHandle*>(handle);
     shard_[Shard(h->hash)].Release(handle);
@@ -433,10 +438,12 @@ class ShardedLRUCache : public Cache {
   virtual void* Value(Handle* handle) {
     return reinterpret_cast<LRUHandle*>(handle)->value;
   }
+  //获得新的last_id
   virtual uint64_t NewId() {
     MutexLock l(&id_mutex_);
     return ++(last_id_);
   }
+  //对每个LRUCache进行prune
   virtual void Prune() {
     for (int s = 0; s < kNumShards; s++) {
       shard_[s].Prune();
