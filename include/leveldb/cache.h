@@ -29,7 +29,7 @@ class Cache;
 // of Cache uses a least-recently-used eviction policy.
 extern Cache* NewLRUCache(size_t capacity);
 
-//Cache接口，LRUCache会继承这个接口并实现相应功能
+//Cache接口，SharedLRUCache会继承这个接口并实现相应功能
 class Cache {
  public:
   Cache() { }
