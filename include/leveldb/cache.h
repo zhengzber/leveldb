@@ -29,6 +29,7 @@ class Cache;
 // of Cache uses a least-recently-used eviction policy.
 extern Cache* NewLRUCache(size_t capacity);
 
+//Cache接口，LRUCache会继承这个接口并实现相应功能
 class Cache {
  public:
   Cache() { }
@@ -46,17 +47,17 @@ class Cache {
   // Returns a handle that corresponds to the mapping.  The caller
   // must call this->Release(handle) when the returned mapping is no
   // longer needed.
-  //
   // When the inserted entry is no longer needed, the key and
   // value will be passed to "deleter".
+  //使用者要调用Release接口来释放这个handle，插入时也要注册释放函数
   virtual Handle* Insert(const Slice& key, void* value, size_t charge,
                          void (*deleter)(const Slice& key, void* value)) = 0;
 
   // If the cache has no mapping for "key", returns NULL.
-  //
   // Else return a handle that corresponds to the mapping.  The caller
   // must call this->Release(handle) when the returned mapping is no
   // longer needed.
+  //使用者要调用Release接口来释放这个handle
   virtual Handle* Lookup(const Slice& key) = 0;
 
   // Release a mapping returned by a previous Lookup().
@@ -73,6 +74,7 @@ class Cache {
   // If the cache contains entry for key, erase it.  Note that the
   // underlying entry will be kept around until all existing handles
   // to it have been released.
+  //基于引用计数的释放
   virtual void Erase(const Slice& key) = 0;
 
   // Return a new numeric id.  May be used by multiple clients who are
@@ -86,10 +88,12 @@ class Cache {
   // Default implementation of Prune() does nothing.  Subclasses are strongly
   // encouraged to override the default implementation.  A future release of
   // leveldb may change Prune() to a pure abstract method.
+  //在LRUCache的实现中是移除lru双向链表中的所有节点to reduce memory usage
   virtual void Prune() {}
 
   // Return an estimate of the combined charges of all elements stored in the
   // cache.
+  //预估的总的内存占用量
   virtual size_t TotalCharge() const = 0;
 
  private:
