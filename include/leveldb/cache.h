@@ -29,6 +29,17 @@ class Cache;
 // of Cache uses a least-recently-used eviction policy.
 extern Cache* NewLRUCache(size_t capacity);
 
+/*
+ 一般底层Handle有引用计数，然后调用Release的话会atomic dec.如果==0的话那么会调用Insert时候的deleter接口进行释放。 这里稍微总结一下Cache提供的接口
+
+    Insert // 插入kv返回Handle
+    Lookup // 查询k返回Handle
+    Value // 传入handle得到对应的value
+    Erase // 删除kv
+    NewId // 产生一个新id.
+    实现是ShardedLRUCache
+*/
+ 
 //Cache接口，SharedLRUCache会继承这个接口并实现相应功能
 class Cache {
  public:
