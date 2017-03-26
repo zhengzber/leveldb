@@ -26,6 +26,7 @@ class FilterPolicy;
 //
 // The sequence of calls to FilterBlockBuilder must match the regexp:
 //      (StartBlock AddKey*)* Finish
+//meta block存放了bloom filter信息，这样可以减少磁盘读取
 class FilterBlockBuilder {
  public:
   explicit FilterBlockBuilder(const FilterPolicy*);
@@ -37,13 +38,13 @@ class FilterBlockBuilder {
  private:
   void GenerateFilter();
 
-  const FilterPolicy* policy_;
-  std::string keys_;              // Flattened key contents
-  std::vector<size_t> start_;     // Starting index in keys_ of each key
-  std::string result_;            // Filter data computed so far
-  std::vector<Slice> tmp_keys_;   // policy_->CreateFilter() argument
-  std::vector<uint32_t> filter_offsets_;
-
+  const FilterPolicy* policy_;    //过滤策略，比较有名的是布隆过滤器
+  std::string keys_;              // Flattened key contents 每一个filter条目包含的键值
+  std::vector<size_t> start_;     // Starting index in keys_ of each key 每个Filter条目包含键值的首地址偏移量，相对于keys_首地址来说
+  std::string result_;            // Filter data computed so far 到目前为止，所有Filter条目包含的数据
+  std::vector<Slice> tmp_keys_;   // policy_->CreateFilter() argument 临时slice向量，用于向result_添加本次keys_数据
+  std::vector<uint32_t> filter_offsets_; //每个filter的偏移量
+ 
   // No copying allowed
   FilterBlockBuilder(const FilterBlockBuilder&);
   void operator=(const FilterBlockBuilder&);
