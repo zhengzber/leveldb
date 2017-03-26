@@ -83,7 +83,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
          || options_->comparator->Compare(key, last_key_piece) > 0); //当前添加的记录要比上条记录要大，由skiplist有序
   size_t shared = 0;
     
-  //当前记录和上条记录共享prefix key的长度  
+  //当前记录和上条记录共享prefix key的长度。prefix compress是针对last key来做的。
   if (counter_ < options_->block_restart_interval) {
     // See how much sharing to do with previous string
     const size_t min_length = std::min(last_key_piece.size(), key.size());
@@ -93,6 +93,8 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   } else {
     //如果上述条件为false，则增加一个restart point,为buffer当前的起始地址。并且设置counter=0
     // Restart compression
+    //注意这里restart存放的是字节偏移而不是counter.
+    // 因为记录counter那么在read的时候没有办法还原，因为kv都是变长的.
     restarts_.push_back(buffer_.size());
     counter_ = 0;
   }
