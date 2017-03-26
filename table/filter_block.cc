@@ -56,7 +56,7 @@ Slice FilterBlockBuilder::Finish() {
   }
 
   PutFixed32(&result_, array_offset);//将filter偏移数组的首地址追加到result后面
-  result_.push_back(kFilterBaseLg);  // Save encoding parameter in result 将2KB这个数字追加到result后面
+  result_.push_back(kFilterBaseLg);  // Save encoding parameter in result 将11这个数字push_back到result后面，占1个字节！
   return Slice(result_);//返回整个result，此时result就是一个完整的meta block
 }
 
@@ -97,24 +97,28 @@ FilterBlockReader::FilterBlockReader(const FilterPolicy* policy,
       num_(0),
       base_lg_(0) {
   size_t n = contents.size();
-  if (n < 5) return;  // 1 byte for base_lg_ and 4 for start of offset array
-  base_lg_ = contents[n-1];
-  uint32_t last_word = DecodeFixed32(contents.data() + n - 5);
-  if (last_word > n - 5) return;
-  data_ = contents.data();
-  offset_ = data_ + last_word;
-  num_ = (n - 5 - last_word) / 4;
+  if (n < 5) return;  // 1 byte for base_lg_ and 4 for start of offset array。base_lg_占最后1个字节，filter偏移数组首地址相对偏移量占4个字节
+  base_lg_ = contents[n-1];//一般为11
+  uint32_t last_word = DecodeFixed32(contents.data() + n - 5);//将filter偏移数组首地址相对偏移量解析出来放入last_word中
+  if (last_word > n - 5) return; //如果last_word大于n-5那么后面num肯定是错的，这里直接返回，data_为NULL表示当前FilterBlockReader是无效的
+  data_ = contents.data(); //filter_block的起始地址
+  offset_ = data_ + last_word; // filter偏移的起始地址
+  num_ = (n - 5 - last_word) / 4; //filter的个数，每个filter偏移占4个字节，为uint32_t
 }
 
 bool FilterBlockReader::KeyMayMatch(uint64_t block_offset, const Slice& key) {
-  uint64_t index = block_offset >> base_lg_;
+  uint64_t index = block_offset >> base_lg_; //block_offset对应哪个filter-i
   if (index < num_) {
-    uint32_t start = DecodeFixed32(offset_ + index*4);
-    uint32_t limit = DecodeFixed32(offset_ + index*4 + 4);
+    uint32_t start = DecodeFixed32(offset_ + index*4);//对应filter的起始地址（都是相对偏移量）
+    uint32_t limit = DecodeFixed32(offset_ + index*4 + 4);//对应filter的结束地址（即下一个filter的起始地址）:都是相对偏移量
+    //limit在最后一个filter之前
     if (start <= limit && limit <= static_cast<size_t>(offset_ - data_)) {
+      //取得对应的filter数据，起始地址为data_+start，长度为limit-start
       Slice filter = Slice(data_ + start, limit - start);
+      //调用policy_来计算看key是否走filter之中（即key是否能匹配上这段bloom filter数据）
       return policy_->KeyMayMatch(key, filter);
     } else if (start == limit) {
+      //空的filter肯定不会match any key
       // Empty filters do not match any keys
       return false;
     }
