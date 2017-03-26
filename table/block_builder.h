@@ -10,11 +10,37 @@
 #include <stdint.h>
 #include "leveldb/slice.h"
 
+/*
+// When we store a key, we drop the prefix shared with the previous
+// string.  This helps reduce the space requirement significantly.
+// Furthermore, once every K keys, we do not apply the prefix
+// compression and store the entire key.  We call this a "restart
+// point".  The tail end of the block stores the offsets of all of the
+// restart points, and can be used to do a binary search when looking
+// for a particular key.  Values are stored as-is (without compression)
+// immediately following the corresponding key.
+//
+// An entry for a particular key-value pair has the form:
+//     shared_bytes: varint32
+//     unshared_bytes: varint32
+//     value_length: varint32
+//     key_delta: char[unshared_bytes]
+//     value: char[value_length]
+// shared_bytes == 0 for restart points.
+//
+// The trailer of the block has the form:
+//     restarts: uint32[num_restarts]
+//     num_restarts: uint32
+// restarts[i] contains the offset within the block of the ith restart point.
+*/
+
 namespace leveldb {
 
 struct Options;
 
 //构造一个块的，将多个有序的kv写到一个连续内存块中。提供的reset接口允许BlockBuilder重复使用，底层对key的prefix部分进行了压缩
+//对于每K个key的话会保存一个完整key,然后对于 剩余的K-1个key采用prefix-compressed的方式压缩。共享的部分长度叫做shared_bytes,
+ //非共享的部分叫做unshared_bytes. 对于保存这些完整的key的点，叫做restarts
 class BlockBuilder {
  public:
   explicit BlockBuilder(const Options* options);
