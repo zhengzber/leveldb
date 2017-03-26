@@ -11,6 +11,7 @@
 
 namespace leveldb {
 
+//将file和table绑定
 struct TableAndFile {
   RandomAccessFile* file;
   Table* table;
@@ -35,6 +36,7 @@ TableCache::TableCache(const std::string& dbname,
     : env_(options->env),
       dbname_(dbname),
       options_(options),
+      //entries表示cache的capacity，这里使用LRUCache
       cache_(NewLRUCache(entries)) {
 }
 
@@ -46,10 +48,10 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
                              Cache::Handle** handle) {
   Status s;
   char buf[sizeof(file_number)];
-  EncodeFixed64(buf, file_number);
+  EncodeFixed64(buf, file_number); //根据file_number作为key查询
   Slice key(buf, sizeof(buf));
-  *handle = cache_->Lookup(key);
-  if (*handle == NULL) {
+  *handle = cache_->Lookup(key);//首先在cache里查找
+  if (*handle == NULL) { //如果cache里没找到，创建一个file，打开一个table，然后放入cache中
     std::string fname = TableFileName(dbname_, file_number);
     RandomAccessFile* file = NULL;
     Table* table = NULL;
@@ -118,6 +120,8 @@ Status TableCache::Get(const ReadOptions& options,
   return s;
 }
 
+  
+//将file_number编码到Slice中，从cache删除
 void TableCache::Evict(uint64_t file_number) {
   char buf[sizeof(file_number)];
   EncodeFixed64(buf, file_number);
