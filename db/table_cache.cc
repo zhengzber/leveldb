@@ -72,6 +72,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
       // We do not cache error results so that if the error is transient,
       // or somebody repairs the file, we recover automatically.
     } else {
+      //创建一个cache item，注意这里1表示capacity就是个数
       TableAndFile* tf = new TableAndFile;
       tf->file = file;
       tf->table = table;
@@ -97,6 +98,7 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
 
   Table* table = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
   Iterator* result = table->NewIterator(options);
+  //这个clean up是减少引用计数
   result->RegisterCleanup(&UnrefEntry, cache_, handle);
   if (tableptr != NULL) {
     *tableptr = table;
