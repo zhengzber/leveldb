@@ -48,11 +48,11 @@ class TableCache {
   void Evict(uint64_t file_number);
 
  private:
-  Env* const env_;
-  const std::string dbname_;
-  const Options* options_;
-  Cache* cache_;
-
+  Env* const env_; //底层env
+  const std::string dbname_; //打开db名称
+  const Options* options_; //打开options
+  Cache* cache_; //cache对象
+ 
   Status FindTable(uint64_t file_number, uint64_t file_size, Cache::Handle**);
 };
 
