@@ -62,10 +62,10 @@ class FilterBlockReader {
   bool KeyMayMatch(uint64_t block_offset, const Slice& key);
 
  private:
-  const FilterPolicy* policy_;
-  const char* data_;    // Pointer to filter data (at block-start)
-  const char* offset_;  // Pointer to beginning of offset array (at block-end)
-  size_t num_;          // Number of entries in offset array
+  const FilterPolicy* policy_; //过滤策略，leveldb选择的是bloom filter，用户可自定义
+  const char* data_;    // Pointer to filter data (at block-start) filter-block的起始地址
+  const char* offset_;  // Pointer to beginning of offset array (at block-end) 当前filter-block中filter偏移数组的起始位置
+  size_t num_;          // Number of entries in offset array //当前filter-block中filter数目
   size_t base_lg_;      // Encoding parameter (see kFilterBaseLg in .cc file)
 };
 
