@@ -22,18 +22,18 @@ Status BuildTable(const std::string& dbname,
                   FileMetaData* meta) {
   Status s;
   meta->file_size = 0;
-  iter->SeekToFirst();
-
-  std::string fname = TableFileName(dbname, meta->number);
+  iter->SeekToFirst(); //迭代器放在首部，准备遍历数据
+  std::string fname = TableFileName(dbname, meta->number); //注意number这个字段的含义
   if (iter->Valid()) {
     WritableFile* file;
-    s = env->NewWritableFile(fname, &file);
+    s = env->NewWritableFile(fname, &file); //创建一个新的可写文件
     if (!s.ok()) {
       return s;
     }
 
     TableBuilder* builder = new TableBuilder(options, file);
-    meta->smallest.DecodeFrom(iter->key());
+    meta->smallest.DecodeFrom(iter->key()); //遍历iter里的对象，这里会记录
+    //遍历iter,最小最大的记录放在meta里
     for (; iter->Valid(); iter->Next()) {
       Slice key = iter->key();
       meta->largest.DecodeFrom(key);
@@ -42,7 +42,7 @@ Status BuildTable(const std::string& dbname,
 
     // Finish and check for builder errors
     if (s.ok()) {
-      s = builder->Finish();
+      s = builder->Finish(); //写入index和footer部分
       if (s.ok()) {
         meta->file_size = builder->FileSize();
         assert(meta->file_size > 0);
@@ -62,6 +62,7 @@ Status BuildTable(const std::string& dbname,
     delete file;
     file = NULL;
 
+    //将这个sstable加入TableCache中
     if (s.ok()) {
       // Verify that the table is usable
       Iterator* it = table_cache->NewIterator(ReadOptions(),
