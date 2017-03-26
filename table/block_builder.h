@@ -48,7 +48,8 @@ class BlockBuilder {
   const Options*        options_;   //Option类，由最上层open函数传进来，这里主要用于counter_ < options_->block_restart_interval)
                                     //判断两个Restart节点之间，记录数量是否小于option定义的值
   std::string           buffer_;      // Destination buffer 这个块的所有数据，数据一条一条添加到这个string中
-  std::vector<uint32_t> restarts_;    // Restart points 存储每个restart[i]
+  std::vector<uint32_t> restarts_;    // Restart points 存储每个restart[i], restart[i]记录的是相对索引，即restart[0]=0表示第一条记录肯定是非共享的，
+ //restart[i]=t,表示这个块里的第i个非共享的记录是第t条记录
   int                   counter_;     // Number of entries emitted since restart 两个restart之间记录的条数
   bool                  finished_;    // Has Finish() been called? 是否调用finish，即是否写完这个块
   std::string           last_key_;    //每次写记录时的上一条记录，用于提供共享记录部分
