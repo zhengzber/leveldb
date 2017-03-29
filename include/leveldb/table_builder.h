@@ -24,6 +24,7 @@ class BlockHandle;
 class WritableFile;
 
 //TableBuilder用来帮助构建Table.而Table本身只是用来进行查询遍历等操作.用户在完成之后需要Finish或者是Abandon 
+//这里的table是指sstable
 class TableBuilder {
  public:
   // Create a builder that will store the contents of the table it is
