@@ -50,11 +50,14 @@ class WriteBatch {
     virtual void Delete(const Slice& key) = 0;
   };
   Status Iterate(Handler* handler) const;
+ // 阅读后面会发现，这个意思是遍历所有的WriteBatch里面的item
+  // 然后操作handler.handler可能是一个memtable.这样可以将里面所有的内容
+  // 全部存放到memtable里面去.
 
  private:
-  friend class WriteBatchInternal;
-
-  std::string rep_;  // See comment in write_batch.cc for the format of rep_
+  friend class WriteBatchInternal; //底层实现是这个
+ 
+  std::string rep_;  // See comment in write_batch.cc for the format of rep_// 将所有的操作请求做成二进制存放在rep_
 
   // Intentionally copyable
 };
