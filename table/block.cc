@@ -15,6 +15,7 @@
 
 namespace leveldb {
 
+//从之前的BloclBuilder知道restart个数在最后面的4字节 
 inline uint32_t Block::NumRestarts() const {
   assert(size_ >= sizeof(uint32_t));
   return DecodeFixed32(data_ + size_ - sizeof(uint32_t));
@@ -24,19 +25,23 @@ Block::Block(const BlockContents& contents)
     : data_(contents.data.data()),
       size_(contents.data.size()),
       owned_(contents.heap_allocated) {
-  if (size_ < sizeof(uint32_t)) {
+  if (size_ < sizeof(uint32_t)) { // 一个block至少有一个重启点所占的字节数
     size_ = 0;  // Error marker
   } else {
-    size_t max_restarts_allowed = (size_-sizeof(uint32_t)) / sizeof(uint32_t);
+    size_t max_restarts_allowed = (size_-sizeof(uint32_t)) / sizeof(uint32_t); //除去最后一个restart个数的4字节，当前data block有多少个4字节
+    // size太小
     if (NumRestarts() > max_restarts_allowed) {
       // The size is too small for NumRestarts()
       size_ = 0;
     } else {
-      restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
+      //如果了解一个data block的布局，就知道重启点为啥是如下计算了。
+      restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t); 
     }
   }
 }
-
+  
+//data已经由这个Block来托管了.在析构函数里面会释放data_ 
+//如果是用户自己负责的内存，那么析构时需要删除这块内存
 Block::~Block() {
   if (owned_) {
     delete[] data_;
@@ -75,18 +80,18 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
 
 class Block::Iter : public Iterator {
  private:
-  const Comparator* const comparator_;
-  const char* const data_;      // underlying block contents
-  uint32_t const restarts_;     // Offset of restart array (list of fixed32)
-  uint32_t const num_restarts_; // Number of uint32_t entries in restart array
-
+  const Comparator* const comparator_; //比较器
+  const char* const data_;      // underlying block contents  data block的内容
+  uint32_t const restarts_;     // Offset of restart array (list of fixed32) // 重启点数组的首地址
+  uint32_t const num_restarts_; // Number of uint32_t entries in restart array //重启点个数
+  
   // current_ is offset in data_ of current entry.  >= restarts_ if !Valid
-  uint32_t current_;
-  uint32_t restart_index_;  // Index of restart block in which current_ falls
-  std::string key_;
-  Slice value_;
-  Status status_;
-
+  //// current_ 指向正在读取的记录的偏移
+  uint32_t current_; //当前记录偏移
+  uint32_t restart_index_;  // Index of restart block in which current_ falls // 当前记录所在重启点区域
+  std::string key_; //当前记录的键， 这里key需要单独保存,因为我们使用了prefix-compressed.
+  Slice value_; //当前记录的值
+  Status status_; //当前迭代器的状态
   inline int Compare(const Slice& a, const Slice& b) const {
     return comparator_->Compare(a, b);
   }
@@ -102,13 +107,13 @@ class Block::Iter : public Iterator {
   }
 
   void SeekToRestartPoint(uint32_t index) {
-    key_.clear();
-    restart_index_ = index;
+    key_.clear();//一开始key_为空
+    restart_index_ = index;//当前记录所在重启点索引为0
     // current_ will be fixed by ParseNextKey();
 
     // ParseNextKey() starts at the end of value_, so set value_ accordingly
-    uint32_t offset = GetRestartPoint(index);
-    value_ = Slice(data_ + offset, 0);
+    uint32_t offset = GetRestartPoint(index);//找到这个索引重启点的偏移量
+    value_ = Slice(data_ + offset, 0);//value_一开始指向记录的首位置
   }
 
  public:
@@ -120,8 +125,8 @@ class Block::Iter : public Iterator {
         data_(data),
         restarts_(restarts),
         num_restarts_(num_restarts),
-        current_(restarts_),
-        restart_index_(num_restarts_) {
+        current_(restarts_),//当前记录指向重启点数组的首位置，表示无效
+        restart_index_(num_restarts_) {//当前记录所在重启点索引=重启点个数，表示无效
     assert(num_restarts_ > 0);
   }
 
@@ -202,6 +207,7 @@ class Block::Iter : public Iterator {
     }
   }
 
+  //构造出一个迭代器之后，首先要将迭代器的当前记录指向首位置，当前记录所在索引赋值为0
   virtual void SeekToFirst() {
     SeekToRestartPoint(0);
     ParseNextKey();
@@ -253,6 +259,7 @@ class Block::Iter : public Iterator {
   }
 };
 
+// 采用工厂方法创建BlockIterator.
 Iterator* Block::NewIterator(const Comparator* cmp) {
   if (size_ < sizeof(uint32_t)) {
     return NewErrorIterator(Status::Corruption("bad block contents"));
