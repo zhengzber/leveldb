@@ -20,6 +20,7 @@
 
 namespace leveldb {
 
+//迭代器接口非常简单，支持前向和反向遍历。还支持seek到某一个key.支持注册cleanup函数.实现是DBIter.
 class Iterator {
  public:
   Iterator();
