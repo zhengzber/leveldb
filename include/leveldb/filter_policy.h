@@ -39,6 +39,7 @@ class FilterPolicy {
   //
   // Warning: do not change the initial contents of *dst.  Instead,
   // append the newly constructed filter to *dst.
+  //keys都是排好序的，将这些keys加入filter.相当于告知这些keys已经存在。
   virtual void CreateFilter(const Slice* keys, int n, std::string* dst)
       const = 0;
 
