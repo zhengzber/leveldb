@@ -22,6 +22,7 @@ namespace leveldb {
 
 class Slice;
 
+//bits_per_key就是希望为每个key分配多少个bits来进行检测
 class FilterPolicy {
  public:
   virtual ~FilterPolicy();
@@ -46,6 +47,7 @@ class FilterPolicy {
   // the key was in the list of keys passed to CreateFilter().
   // This method may return true or false if the key was not on the
   // list, but it should aim to return false with a high probability.
+ //如果返回false，那么肯定不在；如果为true，那么可能在
   virtual bool KeyMayMatch(const Slice& key, const Slice& filter) const = 0;
 };
 
