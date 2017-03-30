@@ -16,7 +16,11 @@
 #include "util/coding.h"
 
 namespace leveldb {
-
+  
+//Table这个类是sst文件在内存的数据结构，
+//保存了sst文件的index block,meta block，文件指针等等。
+//Table这个类读取数据时，先从Block_cache查询，如果找到了，就直接返回，否则就到磁盘获取
+  
 struct Table::Rep {
   ~Rep() {
     delete filter;
@@ -24,14 +28,14 @@ struct Table::Rep {
     delete index_block;
   }
 
-  Options options;
-  Status status;
-  RandomAccessFile* file;
-  uint64_t cache_id;
-  FilterBlockReader* filter;
-  const char* filter_data;
+  Options options;//上层传进来的options
+  Status status;//这个表格的状态
+  RandomAccessFile* file;//这个Table代表的文件
+  uint64_t cache_id;//缓存序号
+  FilterBlockReader* filter;//读取Meta block类
+  const char* filter_data;//Meta block数据
 
-  BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
+  BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer // 读取Metaindex_block的handle
   Block* index_block;
 };
 
@@ -40,21 +44,22 @@ Status Table::Open(const Options& options,
                    uint64_t size,
                    Table** table) {
   *table = NULL;
-  if (size < Footer::kEncodedLength) {
+  if (size < Footer::kEncodedLength) { // 对于文件大小肯定需要一个footer对象.
     return Status::Corruption("file is too short to be an sstable");
   }
 
-  char footer_space[Footer::kEncodedLength];
-  Slice footer_input;
+  char footer_space[Footer::kEncodedLength];//存储footer空间 
+  Slice footer_input;//footer的内容
   Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength,
-                        &footer_input, footer_space);
+                        &footer_input, footer_space);//从文件读取出footer，随机读
   if (!s.ok()) return s;
 
   Footer footer;
-  s = footer.DecodeFrom(&footer_input);
+  s = footer.DecodeFrom(&footer_input);//从footer_input解码出footer这个类
   if (!s.ok()) return s;
 
   // Read the index block
+  // 读取index block
   BlockContents contents;
   Block* index_block = NULL;
   if (s.ok()) {
@@ -62,16 +67,16 @@ Status Table::Open(const Options& options,
     if (options.paranoid_checks) {
       opt.verify_checksums = true;
     }
-    s = ReadBlock(file, opt, footer.index_handle(), &contents);
+    s = ReadBlock(file, opt, footer.index_handle(), &contents);//读取sst文件一个块函数，有crc检查
     if (s.ok()) {
-      index_block = new Block(contents);
+      index_block = new Block(contents);//转换为block类
     }
   }
 
   if (s.ok()) {
     // We've successfully read the footer and the index block: we're
     // ready to serve requests.
-    Rep* rep = new Table::Rep;
+    Rep* rep = new Table::Rep;//给rep属性赋值 // new创建Rep对象然后构造Table对象.
     rep->options = options;
     rep->file = file;
     rep->metaindex_handle = footer.metaindex_handle();
@@ -80,7 +85,7 @@ Status Table::Open(const Options& options,
     rep->filter_data = NULL;
     rep->filter = NULL;
     *table = new Table(rep);
-    (*table)->ReadMeta(footer);
+    (*table)->ReadMeta(footer);//读取Metaindex block
   } else {
     delete index_block;
   }
@@ -89,7 +94,7 @@ Status Table::Open(const Options& options,
 }
 
 void Table::ReadMeta(const Footer& footer) {
-  if (rep_->options.filter_policy == NULL) {
+  if (rep_->options.filter_policy == NULL) { // 表示没有Metaindex block数据
     return;  // Do not need any metadata
   }
 
@@ -109,9 +114,9 @@ void Table::ReadMeta(const Footer& footer) {
   Iterator* iter = meta->NewIterator(BytewiseComparator());
   std::string key = "filter.";
   key.append(rep_->options.filter_policy->Name());
-  iter->Seek(key);
+  iter->Seek(key);//查找目前过滤器Meta数据的handle
   if (iter->Valid() && iter->key() == Slice(key)) {
-    ReadFilter(iter->value());
+    ReadFilter(iter->value());//读取Meta block，也就是filter条目
   }
   delete iter;
   delete meta;
@@ -120,7 +125,7 @@ void Table::ReadMeta(const Footer& footer) {
 void Table::ReadFilter(const Slice& filter_handle_value) {
   Slice v = filter_handle_value;
   BlockHandle filter_handle;
-  if (!filter_handle.DecodeFrom(&v).ok()) {
+  if (!filter_handle.DecodeFrom(&v).ok()) {//转换为BlockHandle
     return;
   }
 
@@ -128,14 +133,14 @@ void Table::ReadFilter(const Slice& filter_handle_value) {
   // requiring checksum verification in Table::Open.
   ReadOptions opt;
   if (rep_->options.paranoid_checks) {
-    opt.verify_checksums = true;
+    opt.verify_checksums = true;//需要CRC检查
   }
   BlockContents block;
-  if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
+  if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {//将Meta数据读入block
     return;
   }
   if (block.heap_allocated) {
-    rep_->filter_data = block.data.data();     // Will need to delete later
+    rep_->filter_data = block.data.data();     // Will need to delete later//Meta block过滤数据
   }
   rep_->filter = new FilterBlockReader(rep_->options.filter_policy, block.data);
 }
@@ -170,33 +175,33 @@ Iterator* Table::BlockReader(void* arg,
   Cache::Handle* cache_handle = NULL;
 
   BlockHandle handle;
-  Slice input = index_value;
+  Slice input = index_value;//需要读取BlockHandle
   Status s = handle.DecodeFrom(&input);
   // We intentionally allow extra stuff in index_value so that we
   // can add more features in the future.
 
   if (s.ok()) {
     BlockContents contents;
-    if (block_cache != NULL) {
-      char cache_key_buffer[16];
-      EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
-      EncodeFixed64(cache_key_buffer+8, handle.offset());
+    if (block_cache != NULL) {//如果设置了block_cache
+      char cache_key_buffer[16];//block_cache的键值
+      EncodeFixed64(cache_key_buffer, table->rep_->cache_id);//前8字节存储cache_id
+      EncodeFixed64(cache_key_buffer+8, handle.offset());//后8字节存储这个block的偏移量
       Slice key(cache_key_buffer, sizeof(cache_key_buffer));
-      cache_handle = block_cache->Lookup(key);
-      if (cache_handle != NULL) {
+      cache_handle = block_cache->Lookup(key);//在缓存中查找这个cache_handle
+      if (cache_handle != NULL) {//如果缓存找到，直接用缓存中的block
         block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
-      } else {
+      } else {//如果缓存中没有
         s = ReadBlock(table->rep_->file, options, handle, &contents);
         if (s.ok()) {
           block = new Block(contents);
-          if (contents.cachable && options.fill_cache) {
+          if (contents.cachable && options.fill_cache) {//如果这个块设置了可缓存，插入缓存中
             cache_handle = block_cache->Insert(
                 key, block, block->size(), &DeleteCachedBlock);
           }
         }
       }
     } else {
-      s = ReadBlock(table->rep_->file, options, handle, &contents);
+      s = ReadBlock(table->rep_->file, options, handle, &contents);//如果没设置block_cache，直接磁盘读取
       if (s.ok()) {
         block = new Block(contents);
       }
@@ -205,11 +210,11 @@ Iterator* Table::BlockReader(void* arg,
 
   Iterator* iter;
   if (block != NULL) {
-    iter = block->NewIterator(table->rep_->options.comparator);
+    iter = block->NewIterator(table->rep_->options.comparator);//获取这个块的迭代器
     if (cache_handle == NULL) {
-      iter->RegisterCleanup(&DeleteBlock, block, NULL);
+      iter->RegisterCleanup(&DeleteBlock, block, NULL);//如果没有设置缓存，那么注册删除block函数
     } else {
-      iter->RegisterCleanup(&ReleaseBlock, block_cache, cache_handle);
+      iter->RegisterCleanup(&ReleaseBlock, block_cache, cache_handle);//如果设置了缓存，那么注册释放block函数，就是引用数减1.
     }
   } else {
     iter = NewErrorIterator(s);
@@ -219,7 +224,7 @@ Iterator* Table::BlockReader(void* arg,
 
 Iterator* Table::NewIterator(const ReadOptions& options) const {
   return NewTwoLevelIterator(
-      rep_->index_block->NewIterator(rep_->options.comparator),
+      rep_->index_block->NewIterator(rep_->options.comparator),//首先穿进去的index block的迭代器，用于读取data block
       &Table::BlockReader, const_cast<Table*>(this), options);
 }
 
@@ -258,12 +263,12 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k,
 uint64_t Table::ApproximateOffsetOf(const Slice& key) const {
   Iterator* index_iter =
       rep_->index_block->NewIterator(rep_->options.comparator);
-  index_iter->Seek(key);
+  index_iter->Seek(key); // 使用iterator seek到kv的index的位置.
   uint64_t result;
   if (index_iter->Valid()) {
     BlockHandle handle;
     Slice input = index_iter->value();
-    Status s = handle.DecodeFrom(&input);
+    Status s = handle.DecodeFrom(&input);// 从index这个BlockHandle中知道数据的偏移.
     if (s.ok()) {
       result = handle.offset();
     } else {
@@ -278,6 +283,8 @@ uint64_t Table::ApproximateOffsetOf(const Slice& key) const {
     // right near the end of the file).
     result = rep_->metaindex_handle.offset();
   }
+  // 如果找不到这个key的话，那么返回metaindex block的偏移.
+  // 这个是meta block的最后位置.
   delete index_iter;
   return result;
 }
