@@ -17,7 +17,7 @@ class VersionSet;
 struct FileMetaData {
   int refs;
   int allowed_seeks;          // Seeks allowed until compaction
-  uint64_t number;
+  uint64_t number;  //file_number.比如1.sst.这个结合BuildTable和TableCache可以理解意思.
   uint64_t file_size;         // File size in bytes
   InternalKey smallest;       // Smallest internal key served by table
   InternalKey largest;        // Largest internal key served by table
@@ -84,22 +84,23 @@ class VersionEdit {
  private:
   friend class VersionSet;
 
-  typedef std::set< std::pair<int, uint64_t> > DeletedFileSet;
+  typedef std::set< std::pair<int, uint64_t> > DeletedFileSet;  //定义删除文件集合，<层次，文件编号>
 
-  std::string comparator_;
-  uint64_t log_number_;
-  uint64_t prev_log_number_;
-  uint64_t next_file_number_;
-  SequenceNumber last_sequence_;
-  bool has_comparator_;
+  std::string comparator_; //比较器
+  uint64_t log_number_; //日志文件编号
+  uint64_t prev_log_number_;//上一个日志文件编号
+  uint64_t next_file_number_;//下一个文件编号
+  SequenceNumber last_sequence_;//上一个序列号
+  bool has_comparator_;/是否有比较器
   bool has_log_number_;
   bool has_prev_log_number_;
   bool has_next_file_number_;
   bool has_last_sequence_;
 
+  //压缩点<层次，InternalKey键>
   std::vector< std::pair<int, InternalKey> > compact_pointers_;
-  DeletedFileSet deleted_files_;
-  std::vector< std::pair<int, FileMetaData> > new_files_;
+  DeletedFileSet deleted_files_;//删除文件集合
+  std::vector< std::pair<int, FileMetaData> > new_files_;//新添加的文件集合
 };
 
 }  // namespace leveldb
