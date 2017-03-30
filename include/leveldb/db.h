@@ -24,6 +24,7 @@ class WriteBatch;
 // Abstract handle to particular state of a DB.
 // A Snapshot is an immutable object and can therefore be safely
 // accessed from multiple threads without any external synchronization.
+//快照的接口，是只读的，故可支持多线程并发访问
 class Snapshot {
  protected:
   virtual ~Snapshot();
