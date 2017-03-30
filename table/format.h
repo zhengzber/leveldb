@@ -35,7 +35,7 @@ class BlockHandle {
   Status DecodeFrom(Slice* input);
 
   // Maximum encoding length of a BlockHandle
-  enum { kMaxEncodedLength = 10 + 10 };
+  enum { kMaxEncodedLength = 10 + 10 };// uint64最大压缩大小为10字节.
 
  private:
   uint64_t offset_;
