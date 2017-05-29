@@ -38,6 +38,7 @@ namespace leveldb {
 class Arena;
 
 template<typename Key, class Comparator>
+//跳跃表，作为memtable的内部结构，存储的key是有序的
 class SkipList {
  private:
   struct Node;
@@ -46,51 +47,63 @@ class SkipList {
   // Create a new SkipList object that will use "cmp" for comparing keys,
   // and will allocate memory using "*arena".  Objects allocated in the arena
   // must remain allocated for the lifetime of the skiplist object.
+  //构造函数带参数内存分配器和key comparator
   explicit SkipList(Comparator cmp, Arena* arena);
 
   // Insert key into the list.
   // REQUIRES: nothing that compares equal to key is currently in the list.
+  //插入key到skiplist
   void Insert(const Key& key);
 
   // Returns true iff an entry that compares equal to key is in the list.
+  //这个skiplist是否包含这个key
   bool Contains(const Key& key) const;
 
   // Iteration over the contents of a skip list
+  //skiplist的迭代器，迭代器指向一个节点，迭代器会遍历skiplist然后通过迭代器会找到某个节点
   class Iterator {
    public:
     // Initialize an iterator over the specified list.
     // The returned iterator is not valid.
+    //迭代器的构造函数是skiplist
     explicit Iterator(const SkipList* list);
 
     // Returns true iff the iterator is positioned at a valid node.
+    //当前迭代器是否指向一个valid的节点
     bool Valid() const;
 
     // Returns the key at the current position.
     // REQUIRES: Valid()
+    //当前迭代器指向的key
     const Key& key() const;
 
     // Advances to the next position.
     // REQUIRES: Valid()
+    //迭代器到下一个节点
     void Next();
 
     // Advances to the previous position.
     // REQUIRES: Valid()
+    //迭代器的上一个节点
     void Prev();
 
     // Advance to the first entry with a key >= target
+    //到第一个节点which key>=target
     void Seek(const Key& target);
 
     // Position at the first entry in list.
     // Final state of iterator is Valid() iff list is not empty.
+    //直接到skiplist的第一个节点
     void SeekToFirst();
 
     // Position at the last entry in list.
     // Final state of iterator is Valid() iff list is not empty.
+    //直接到skiplist的最后一个节点
     void SeekToLast();
 
    private:
-    const SkipList* list_;
-    Node* node_;
+    const SkipList* list_; //成员是const，必须在构造函数的初始化列表中进行初始化
+    Node* node_; //当前迭代器指向的节点
     // Intentionally copyable
   };
 
@@ -144,19 +157,22 @@ class SkipList {
 
 // Implementation details follow
 template<typename Key, class Comparator>
+//skiplist的内部节点
 struct SkipList<Key,Comparator>::Node {
   explicit Node(const Key& k) : key(k) { }
 
-  Key const key;
+  Key const key; //节点的key
 
   // Accessors/mutators for links.  Wrapped in methods so we can
   // add the appropriate barriers as necessary.
+  //返回当前节点的第n层的节点
   Node* Next(int n) {
     assert(n >= 0);
     // Use an 'acquire load' so that we observe a fully initialized
     // version of the returned Node.
     return reinterpret_cast<Node*>(next_[n].Acquire_Load());
   }
+  //设置当前节点的第n层的节点
   void SetNext(int n, Node* x) {
     assert(n >= 0);
     // Use a 'release store' so that anybody who reads through this
@@ -176,7 +192,7 @@ struct SkipList<Key,Comparator>::Node {
 
  private:
   // Array of length equal to the node height.  next_[0] is lowest level link.
-  port::AtomicPointer next_[1];
+  port::AtomicPointer next_[1]; //存储当前节点的指针，next_[0]指向第0层的节点，next_[1]指向第1层的节点，next_[2]指向第2层的节点
 };
 
 template<typename Key, class Comparator>
