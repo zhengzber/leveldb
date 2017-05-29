@@ -38,7 +38,7 @@ namespace leveldb {
 class Arena;
 
 template<typename Key, class Comparator>
-//跳跃表，作为memtable的内部结构，存储的key是有序的
+//跳跃表，作为memtable的内部结构，存储的key是有序的。对外暴露的接口只有两个，分别是插入节点，和判断某个key是否在skiplist中
 class SkipList {
  private:
   struct Node;
@@ -52,11 +52,11 @@ class SkipList {
 
   // Insert key into the list.
   // REQUIRES: nothing that compares equal to key is currently in the list.
-  //插入key到skiplist
+  //插入key到skiplist，对外暴露的接口之一
   void Insert(const Key& key);
 
   // Returns true iff an entry that compares equal to key is in the list.
-  //这个skiplist是否包含这个key
+  //这个skiplist是否包含这个key，对外暴露的接口之一
   bool Contains(const Key& key) const;
 
   // Iteration over the contents of a skip list
@@ -108,31 +108,33 @@ class SkipList {
   };
 
  private:
-  enum { kMaxHeight = 12 };
+  enum { kMaxHeight = 12 }; //这种用法表示类中的常量，表示skiplist的最大高度
 
   // Immutable after construction
-  Comparator const compare_;
-  Arena* const arena_;    // Arena used for allocations of nodes
+  Comparator const compare_; //key的比较器，成员之一
+  Arena* const arena_;    // Arena used for allocations of nodes 内存分配器，成员之一
 
-  Node* const head_;
+  Node* const head_; //skiplist的头节点
 
   // Modified only by Insert().  Read racily by readers, but stale
   // values are ok.
-  port::AtomicPointer max_height_;   // Height of the entire list
+  port::AtomicPointer max_height_;   // Height of the entire list //当前的高度，随着insert和delete可能会update
 
+  //返回当前高度
   inline int GetMaxHeight() const {
     return static_cast<int>(
         reinterpret_cast<intptr_t>(max_height_.NoBarrier_Load()));
   }
 
   // Read/written only by Insert().
-  Random rnd_;
+  Random rnd_; //随机数生成器，对于一个新的insert key，需要随机生成它的高度
 
-  Node* NewNode(const Key& key, int height);
-  int RandomHeight();
-  bool Equal(const Key& a, const Key& b) const { return (compare_(a, b) == 0); }
+  Node* NewNode(const Key& key, int height); //创建一个新节点，高度是height
+  int RandomHeight();//返回一个随机的高度值
+  bool Equal(const Key& a, const Key& b) const { return (compare_(a, b) == 0); } //判断2个key是否相等
 
   // Return true if key is greater than the data stored in "n"
+  //key比n节点中的key要大
   bool KeyIsAfterNode(const Key& key, Node* n) const;
 
   // Return the earliest node that comes at or after key.
