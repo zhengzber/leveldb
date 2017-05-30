@@ -38,7 +38,9 @@ namespace leveldb {
 class Arena;
 
 template<typename Key, class Comparator>
-//跳跃表，作为memtable的内部结构，存储的key是有序的。对外暴露的接口只有两个，分别是插入节点，和判断某个key是否在skiplist中
+//跳跃表，作为memtable的内部结构，存储的key是有序的。对外暴露的接口只有两个，分别是插入节点，和判断某个key是否在skiplist中。
+//包含一个迭代器，提供seek来定位到某个key，和seekToFirst和seekToLast，Next和Prev的方法。
+//由于跳跃表的每层的单向链表来实现的，故Prev方法不高效需要O(logN)时间来遍历到前一个节点
 class SkipList {
  private:
   struct Node;
@@ -229,6 +231,7 @@ inline const Key& SkipList<Key,Comparator>::Iterator::key() const {
 }
 
 //返回node->Next(0)节点，就是当前迭代器的指向节点的下一个节点
+//迭代器的Next方法很高效，时间O(1)，直接取下个节点的指针即可
 template<typename Key, class Comparator>
 inline void SkipList<Key,Comparator>::Iterator::Next() {
   assert(Valid());
@@ -236,6 +239,7 @@ inline void SkipList<Key,Comparator>::Iterator::Next() {
 }
 
 //调用node_=FindlessThan(node_->key)，如果返回的是头节点那么设置为NULL表示not valid node
+//迭代器的Prev方法不高效，需要时间O(logN）：即从高height往低height遍历一遍skiplist来找到合适的节点
 template<typename Key, class Comparator>
 inline void SkipList<Key,Comparator>::Iterator::Prev() {
   // Instead of using explicit "prev" links, we just search for the
@@ -247,13 +251,13 @@ inline void SkipList<Key,Comparator>::Iterator::Prev() {
   }
 }
 
-//调用FindGreaterOrEqual
+//找到大于或等于target的节点，并放在迭代器的节点node_中
 template<typename Key, class Comparator>
 inline void SkipList<Key,Comparator>::Iterator::Seek(const Key& target) {
   node_ = list_->FindGreaterOrEqual(target, NULL);
 }
 
-//设置node_为头节点的Next(0)
+//设置迭代器的node_为头节点的Next(0)
 template<typename Key, class Comparator>
 inline void SkipList<Key,Comparator>::Iterator::SeekToFirst() {
   node_ = list_->head_->Next(0);
