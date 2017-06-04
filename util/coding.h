@@ -16,6 +16,9 @@
 #include "leveldb/slice.h"
 #include "port/port.h"
 
+//将int32_t, uint32_t, int64_t, uint64_t都转换成字符型存储即放入char*数组中，来减少内存空间的使用。例如，假如有一个int型数据，
+//小于128，存储为整型时，需要占用四个字节，存储为字符型时，只需要一个字节即可。leveldb有两种整型和字符型数据转换。一种是fixed，一种是varint。
+
 namespace leveldb {
 
 // Standard Put... routines append to a string
