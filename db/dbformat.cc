@@ -11,13 +11,15 @@ namespace leveldb {
 
 //8字节共64位二进制，其实高56位放seq,低8位放类型，返回一个uint64_t
 //高58位放入sequence number, 低8位放入valuetype
+//即将sequence number和value_type组成8字节返回（高位7字节放sequence number，低1字节放value_type）
 static uint64_t PackSequenceAndType(uint64_t seq, ValueType t) {
   assert(seq <= kMaxSequenceNumber);
   assert(t <= kValueTypeForSeek);
   return (seq << 8) | t;
 }
 
-//将InternalKey解析后的表示序列化成二进制格式放在result中，其中刚开始放入user_key，然后放入8位uint64_t(包括seq,和type)
+//将ParsedInternalKey序列化成InternalKey，append到result中。即先把user_key放入result，然后把sequence number和value_type放入8字节中，
+//然后8字节编码成fixed char buf[8]中，然后result中
 void AppendInternalKey(std::string* result, const ParsedInternalKey& key) {
   result->append(key.user_key.data(), key.user_key.size());
   PutFixed64(result, PackSequenceAndType(key.sequence, key.type));
@@ -50,6 +52,7 @@ const char* InternalKeyComparator::Name() const {
   return "leveldb.InternalKeyComparator";
 }
 
+//akey和bkey都是InternalKey
 //先比较user_key，如果相等；那么比较sequence number（这里直接比较uint64_t，如果sequence_number也相等，
 //那么隐含地表示将会比较value_type即低8位）
 //先按user_key的升序排序；如果相等，然后按照sequence number的降序排序；如果相等，那么按照value_type的降序排序
@@ -126,7 +129,7 @@ bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
 
 LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
-  //kLength占5个字节，tag占8个字节
+  //kLength占5个字节，sequence number和value_type
   size_t needed = usize + 13;  // A conservative estimate
   char* dst;
   //如果需要的内存小于等于200字节，那么直接使用space_，否则从堆上分配
