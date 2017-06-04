@@ -156,6 +156,10 @@ bool GetVarint32(Slice* input, uint32_t* value) {
 }
 
 //将char* [p...limit]的字节解析成uint64_t，然后赋值给value，返回char*
+/*
+解析varint的代码，思想主要就是取出字符数组的每一个字节，然后取出低7位的值，
+赋值给result的低7位。如果有第二个字节，则取出第二个字节得到低7位，向左移动7位，然后赋给result的8~14位。后续也是如此。
+*/
 const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* value) {
   uint64_t result = 0;
   for (uint32_t shift = 0; shift <= 63 && p < limit; shift += 7) {
