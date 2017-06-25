@@ -30,7 +30,7 @@ MemTable::~MemTable() {
   assert(refs_ == 0);
 }
 
-size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }
+size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }//返回内存池的大概内存，skiplist的节点内存需要从arena_中分配
 
 //这里KeyComparator的话因为考虑到key是length-prefixed的，所以先把length从ptr中移去，然后调用comparator去比较字符串（）
 int MemTable::KeyComparator::operator()(const char* aptr, const char* bptr)
@@ -84,8 +84,8 @@ Iterator* MemTable::NewIterator() {
   return new MemTableIterator(&table_);
 }
 
-//整体就是将key, value, s, type打包成memtable的格式：InternalKey_size+InternalKey(由key+sequence+type组成)+
-//value_size+value 然后放入由arena分配的一块内存中，将这块内存char*插入到table中(skiplist)
+//将key, value, s, type打包成skiplist里的存储结构（const char*）：internal_key_size+internal_key+value_size+value
+//然后插入到skiplist中（这个存储结构需要从arena分配一块内存）
 void MemTable::Add(SequenceNumber s, ValueType type,
                    const Slice& key,
                    const Slice& value) {
@@ -94,11 +94,11 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   //  key bytes    : char[internal_key.size()]
   //  value_size   : varint32 of value.size()
   //  value bytes  : char[value.size()]
-  size_t key_size = key.size();
-  size_t val_size = value.size();
-  size_t internal_key_size = key_size + 8;// user_key_size+8字节（8字节用来序列化sequence_number+value_type）
+  size_t key_size = key.size(); //键的大小
+  size_t val_size = value.size(); //值得大小
+  size_t internal_key_size = key_size + 8;// internal key的大小 user_key_size+8字节（8字节用来序列化sequence_number+value_type）
   //整个存储需要的字节数，注意已加8字节将user_key变成了InternalKey
-  const size_t encoded_len =
+  const size_t encoded_len = //总大小
       VarintLength(internal_key_size) + internal_key_size +
       VarintLength(val_size) + val_size;
   char* buf = arena_.Allocate(encoded_len);//从内存分配器中分配一块连续的内存
@@ -110,7 +110,7 @@ void MemTable::Add(SequenceNumber s, ValueType type,
   p = EncodeVarint32(p, val_size);//将val_size也放进去
   memcpy(p, value.data(), val_size);//把val给放进去
   assert((p + val_size) - buf == encoded_len);//这里应该相等，一块内存正好用完
-  table_.Insert(buf); //将这个key插入
+  table_.Insert(buf); //将这个buf插入skiplist中
 }
 
 //skiplist里存的是InternalKey_size+InternalKey+val_size+val。LoopupKey是InternalKey_size+InternalKey。
@@ -118,10 +118,11 @@ void MemTable::Add(SequenceNumber s, ValueType type,
 //如果不相等，那么返回false；如果相等，再把InternalKey解析出来，再从InternalKey解析出最后的8字节找到sequence+value_type，如果value_type
 //是普通类型，那么解析出val然后赋值返回true；如果value_type是删除类型，那么设置status然后返回true
 bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
-  Slice memkey = key.memtable_key();//获得LookupKey的整个内存即：InternalKey_size+InternalKey
+  Slice memkey = key.memtable_key();//获得memtable_key，即internal_key_size+internal_key
   Table::Iterator iter(&table_);//在table(skiplist)上的迭代器
   iter.Seek(memkey.data());//寻找memkey
-  if (iter.Valid()) { //如果找到的node不为NULL的话，那么找到一个和memkey相等或比它大的node
+  if (iter.Valid()) { //如果找到的node不为NULL的话，那么找到一个和memkey相等或比它大的node(因为存储在skiplist的是internal_key_size+internal_key
+    //+value_size+value，所以拿internal_key_size+internal_key去match key的话，可能找到前缀匹配的，但真正key并不相同的)
     // entry format is:
     //    klength  varint32
     //    userkey  char[klength]
