@@ -36,7 +36,20 @@
 namespace leveldb {
 
 class Arena;
-
+/*
+这是memtable里的table类型，用户key插入到memtable中会调用Table的接口把数据插入skiplist。那么skiplist中的
+key是啥呢？其实是"internal_key_size+internal_key+value_size+value"这样一组const char*,即把user_key, seq_num和value_type
+先打包成internal_key，然后将internal_key（包括大小）和value(包括大小）放入一块内存让后整体作为key插入skiplist中。
+而skiplist的keyCompartor是啥呢？其实是  struct KeyComparator {
+    const InternalKeyComparator comparator;
+    explicit KeyComparator(const InternalKeyComparator& c) : comparator(c) { }
+    int operator()(const char* a, const char* b) const;
+  };
+即是InternalKeyComparator，虽然key由internal_key和value组成，但真正需要比较的就是internalkey而已。
+typedef SkipList<const char*, KeyComparator> Table;  
+*/
+ 
+//这里的key其实是internal_key_size+internal_key+value_size+value的内存，comparator起是internalkeycomparator
 template<typename Key, class Comparator>
 //跳跃表，作为memtable的内部结构，存储的key是有序的。对外暴露的接口只有两个，分别是插入节点，和判断某个key是否在skiplist中。
 //包含一个迭代器，提供seek来定位到某个key，和seekToFirst和seekToLast，Next和Prev的方法。
