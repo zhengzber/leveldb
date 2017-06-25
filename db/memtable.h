@@ -17,6 +17,7 @@ class InternalKeyComparator;
 class Mutex;
 class MemTableIterator;
 
+//memtable是代理模式，底层用的存储（放内存中）是skiplist
 class MemTable {
  public:
   // MemTables are reference counted.  The initial reference count
@@ -74,12 +75,12 @@ class MemTable {
   friend class MemTableIterator;
   friend class MemTableBackwardIterator;
 
-  typedef SkipList<const char*, KeyComparator> Table;
+  typedef SkipList<const char*, KeyComparator> Table; //table的类型，
 
-  KeyComparator comparator_;//key比较器
+  KeyComparator comparator_;//key比较器，这里的key是internalkey（即user_key+seq_num+value_type的封装）
   int refs_; //引用计数
   Arena arena_; //内存分配
-  Table table_;//底层table结构是用skiplist存储的
+  Table table_;//底层table结构是用skiplist存储的,
   // No copying allowed
   MemTable(const MemTable&);
   void operator=(const MemTable&);
