@@ -106,7 +106,7 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
 
   // Format the header
   char buf[kHeaderSize];//7个字节的记录头。前4字节是crc校验，第5、6字节是数据长度，第7字节是类型
-  buf[4] = static_cast<char>(n & 0xff); //注意buf[4]放长度的低位8字节，buf[5]放长度的高位8字节，小端模式？
+  buf[4] = static_cast<char>(n & 0xff); //注意buf[4]放长度的低位8字节，buf[5]放长度的高位8字节，是小端模式
   buf[5] = static_cast<char>(n >> 8);
   buf[6] = static_cast<char>(t);
 
