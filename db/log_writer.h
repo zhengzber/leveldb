@@ -34,12 +34,12 @@ class Writer {
 
  private:
   WritableFile* dest_; //log日志文件封装类
-  int block_offset_;       // Current offset in block，在当前block的偏移量
+  int block_offset_;       // Current offset in block，在当前block的偏移量，开始为0
   // crc32c values for all supported record types.  These are
   // pre-computed to reduce the overhead of computing the crc of the
   // record type stored in the header.
   uint32_t type_crc_[kMaxRecordType + 1];//各种类型的crc2c，避免重复计算
-  Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
+  Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length); //length长度的用户数据Ptr写入文件中，当然header要先写进去
 
   // No copying allowed
   Writer(const Writer&);
