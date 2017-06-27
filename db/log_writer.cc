@@ -33,8 +33,9 @@ Writer::Writer(WritableFile* dest, uint64_t dest_length)
 Writer::~Writer() {
 }
 
+//根据用户的slice产生一条record
 Status Writer::AddRecord(const Slice& slice) {
-  const char* ptr = slice.data();//添加记录数据
+  const char* ptr = slice.data();//记录数据起始地址
   size_t left = slice.size();//记录数据长度
   
   // Fragment the record if necessary and emit it.  Note that if slice
@@ -45,19 +46,20 @@ Status Writer::AddRecord(const Slice& slice) {
   Status s;
   bool begin = true;//当前为头部
   do {
-    const int leftover = kBlockSize - block_offset_;//当前block剩余多少内容
+    const int leftover = kBlockSize - block_offset_;//当前block剩余多少长度的容量
     
     /*
     *将一个记录放入block中，其中记录包括记录头和数据部分：
     *1、先看记录头能不能放下，如果不能，那么开辟一个新block
     */
     assert(leftover >= 0);
-    if (leftover < kHeaderSize) { //如果剩余容量小于记录头长度
+    if (leftover < kHeaderSize) { //如果剩余容量小于记录头长度，即小于7字节
       // Switch to a new block
+      //填充剩余的部分为0
       if (leftover > 0) {
         // Fill the trailer (literal below relies on kHeaderSize being 7)
         assert(kHeaderSize == 7);
-        dest_->Append(Slice("\x00\x00\x00\x00\x00\x00", leftover));//剩余的部分填充0x00
+        dest_->Append(Slice("\x00\x00\x00\x00\x00\x00", leftover));//剩余的部分填充0
       }
       block_offset_ = 0; //开始写一个新块，偏移量就为0了
     }
@@ -66,34 +68,37 @@ Status Writer::AddRecord(const Slice& slice) {
     //不变量：block中不会留下小于7字节的空间
     assert(kBlockSize - block_offset_ - kHeaderSize >= 0);
 
-    const size_t avail = kBlockSize - block_offset_ - kHeaderSize; //当前block可用的容量
-    const size_t fragment_length = (left < avail) ? left : avail;//看看剩余容量够不够放记录数据大小的
+    const size_t avail = kBlockSize - block_offset_ - kHeaderSize; //当前block可用的容量长度
+    const size_t fragment_length = (left < avail) ? left : avail;//剩余容量可放入的当前数据的大小
+    
+    //注意如果left是0的话，那么也会写入一条记录的，因为函数入口没有对left=0的请求直接返回。
     
     RecordType type;
     const bool end = (left == fragment_length); //如果end=true：剩余容量够放记录数据大小；否则不够放记录数据大小
     if (begin && end) {
-      //此时记录头还没放进去，剩余容量也够放记录数据大小的，那么就够放完整的记录即full
+      //第一次进入这个循环，并且剩余容量够放数据大小，那么把完整的记录放进去，即类型是full
       type = kFullType;
     } else if (begin) {
-      //此时记录头还没放进去，但剩余容量不够放记录数据大小的，那么就把记录头放进去，然后放部分数据，就是记录的第一个部分数据
+      //第一次进入这个循环，并且剩余容量不够放数据大小，那么把数据的前面部分放进去，即类型是first
       type = kFirstType;
     } else if (end) {
-      //此时记录头已放进去了，剩余容量够放记录数据大小的，那么就是记录的最后部分
+      //不是第一次进入这个循环，即用户数据已经放了一部分进去了，如果剩余容量够放数据，那么就是最后的记录了，即last
       type = kLastType;
     } else {
-      //此时记录头已放进去，剩余容量也不够放记录数据大小的，就是数据的中间部分（不包括记录头）
+      //不是第一次进入这个循环，即用户数据已经放了一部分进去了，并且剩余容量不够放其他数据的，那么就把剩余容量填充一部分数据，作为中间的记录，即middle
       type = kMiddleType;
     }
 
-    //将这部分数据输出，其中包括记录ptr数据，大小数据和type
+    //将当前block剩余的容量填充好用户数据，用户数据是ptr，放进去的大小是fragment_length，类型是type
     s = EmitPhysicalRecord(type, ptr, fragment_length);
-    ptr += fragment_length;//已放了fragment_length大小数据，向前移动这么多
-    left -= fragment_length;//还有多少数据待放置
-    begin = false;//记录头已经放过了
+    ptr += fragment_length;//已放了fragment_length大小数据，用户数据向前移动
+    left -= fragment_length;//用户数据还剩多少
+    begin = false;//用户数据已经放过一部分了，不是是记录头了
   } while (s.ok() && left > 0);
   return s;
 }
 
+//先把header append到文件，然后把数据append到文件，然后刷新文件落盘，全部操作都ok才返回ok。
 Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
   assert(n <= 0xffff);  // Must fit in two bytes
   //当前容量肯定够放记录头和n个字节数据大小，因为由上面的AddRecord函数来保证
@@ -101,7 +106,7 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
 
   // Format the header
   char buf[kHeaderSize];//7个字节的记录头。前4字节是crc校验，第5、6字节是数据长度，第7字节是类型
-  buf[4] = static_cast<char>(n & 0xff);
+  buf[4] = static_cast<char>(n & 0xff); //注意buf[4]放长度的低位8字节，buf[5]放长度的高位8字节，小端模式？
   buf[5] = static_cast<char>(n >> 8);
   buf[6] = static_cast<char>(t);
 
@@ -122,6 +127,7 @@ Status Writer::EmitPhysicalRecord(RecordType t, const char* ptr, size_t n) {
       s = dest_->Flush();
     }
   }
+  //注意如果放入头部7字节失败后，Block_offset也会移动7字节+n的，相当于这块7字节+n的内容被占用了，这样不至于破坏其它block的结构。
   //移动block的偏移量，包括记录头和数据大小
   block_offset_ += kHeaderSize + n;
   return s;
