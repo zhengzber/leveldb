@@ -33,11 +33,16 @@ Reader::~Reader() {
   delete[] backing_store_;//释放block的临时buffer
 }
 
+//跳到initial_offset所在的block的起始地址
 bool Reader::SkipToInitialBlock() {
+  /*
+  假设initial_offset=32k+2，那么offset_in_block=2, block_start_location=32k
+  */
   size_t offset_in_block = initial_offset_ % kBlockSize;
-  uint64_t block_start_location = initial_offset_ - offset_in_block;
+  uint64_t block_start_location = initial_offset_ - offset_in_block; //当前block的起始地址
 
   // Don't search a block if we'd be in the trailer
+  //如果当前读取位置在当前block的trailer，那么跳过当前block，从下个block开始处理。
   if (offset_in_block > kBlockSize - 6) {
     offset_in_block = 0;
     block_start_location += kBlockSize;
@@ -58,6 +63,7 @@ bool Reader::SkipToInitialBlock() {
 }
 
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
+  //如果上条记录的偏移量小于初始化读取偏移量，那么跳到第一个block处（即从initial_offset开始的往下找到的第一个block)
   if (last_record_offset_ < initial_offset_) {
     if (!SkipToInitialBlock()) {
       return false;
