@@ -62,7 +62,7 @@ class Reader {
   SequentialFile* const file_; //顺序读取文件对象
   Reporter* const reporter_;//报告错误对象
   bool const checksum_;//是否要进行crc校验
-  char* const backing_store_; //block buffer
+  char* const backing_store_; //block buffer, block的临时buffer,大小是kBlockSize
   Slice buffer_; //record buffer
   bool eof_;   // Last Read() indicated EOF by returning < kBlockSize.表示上次读取是否达到尾部
  
