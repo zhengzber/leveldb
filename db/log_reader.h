@@ -62,14 +62,14 @@ class Reader {
   SequentialFile* const file_; //顺序读取文件对象
   Reporter* const reporter_;//报告错误对象
   bool const checksum_;//是否要进行crc校验
-  char* const backing_store_; //block buffer, block的临时buffer,大小是kBlockSize
-  Slice buffer_; //record buffer
+  char* const backing_store_; //block buffer, block的临时buffer,大小是kBlockSize，用于存放读取block的数据的
+  Slice buffer_; //记录读取的block的剩下内容的，例如读取一个block后拿到了一个完整的记录，那么buffer就是block中剩下的部分
   bool eof_;   // Last Read() indicated EOF by returning < kBlockSize.表示上次读取是否达到尾部
  
   // Offset of the last record returned by ReadRecord.
-  uint64_t last_record_offset_; //上次读取record的偏移量
+  uint64_t last_record_offset_; //上次调用ReadRecord读取到的记录的起始地址
   // Offset of the first location past the end of buffer_.
-  uint64_t end_of_buffer_offset_; //读取record之后顺序文件偏移
+  uint64_t end_of_buffer_offset_; //读取block后，buffer结尾位置
  
   // Offset at which to start looking for the first record to return
   uint64_t const initial_offset_; //开始读取的初始偏移量
