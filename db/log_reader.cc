@@ -62,6 +62,9 @@ bool Reader::SkipToInitialBlock() {
   return true;
 }
 
+//读取一条逻辑记录，底层调用ReadPhysicalRecord将多条物理记录结合起来。
+//对于FullType来说的话record里面使用backing_store内存，而对于First/Middle/Last来说的话 里面使用的是scratch分配的内存
+//读取一条完整的逻辑记录给用户，逻辑记录放在record中，scratch是用于拼接记录的第一部分、中间部分和最后部分数据用的
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
   //如果上条记录的偏移量小于初始化读取偏移量，那么跳到第一个block处（即从initial_offset开始的往下找到的第一个block)
   if (last_record_offset_ < initial_offset_) {
@@ -79,11 +82,15 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
 
   Slice fragment;
   while (true) {
+    //尝试读一条记录，记录的用户数据赋值到fragment中，其实整个块的内存是在backing_store中
     const unsigned int record_type = ReadPhysicalRecord(&fragment);
 
     // ReadPhysicalRecord may have only had an empty trailer remaining in its
     // internal buffer. Calculate the offset of the next physical record now
     // that it has returned, properly accounting for its header size.
+    //当前记录的起始地址（调用ReadPhysicalRecord后，end_of_buffer_offset会加上读取到的整个block的大小，
+    //而buffer会将kHeaderSize和fragment的大小给revmoePrefix，所以当前buffer.size+kHeaderSize+fragment.size的大小
+    //就是ReadPhysicalRecord读取到的block的大小）
     uint64_t physical_record_offset =
         end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();
 
@@ -111,10 +118,12 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(1)");
           }
         }
+        //当前记录的起始地址
         prospective_record_offset = physical_record_offset;
         scratch->clear();
-        *record = fragment;
-        last_record_offset_ = prospective_record_offset;
+        *record = fragment; //读到一条完整的记录了，赋值给record
+        last_record_offset_ = prospective_record_offset; //读到一个条完整的记录，会返回这条完整的记录,
+        //last_record_offset会记录当前块的起始地址作为上条记录的起始地址
         return true;
 
       case kFirstType:
@@ -129,33 +138,43 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(2)");
           }
         }
+        //记录期望本次调研ReadRecord读到的记录的起始地址
         prospective_record_offset = physical_record_offset;
+        //将读到的第一部分内容放入scratch中
         scratch->assign(fragment.data(), fragment.size());
-        in_fragmented_record = true; //下条记录是当前记录的一部分
+        in_fragmented_record = true; //当前读到了第一部分了，继续读下面的物理记录来拼接一个完整的逻辑记录
         break;
 
       case kMiddleType:
+        //必须是in_gragmented_record，如果不是，那么之前读的是错的
         if (!in_fragmented_record) {
           ReportCorruption(fragment.size(),
                            "missing start of fragmented record(1)");
         } else {
+          //把读到的中间部分数据拼接到scratch中
           scratch->append(fragment.data(), fragment.size());
         }
         break;
 
       case kLastType:
+        //必须是in_fragmented_record，如果不是，那么之前读的是错的
         if (!in_fragmented_record) {
           ReportCorruption(fragment.size(),
                            "missing start of fragmented record(2)");
         } else {
+          //把最后一部分数据拼接到scratch中
           scratch->append(fragment.data(), fragment.size());
+          //将scratch的数据完整赋值给record
           *record = Slice(*scratch);
+          //对下条记录而言，当前这条记录的起始地址就是last_record_offset
           last_record_offset_ = prospective_record_offset;
+          //返回一条完整的逻辑记录
           return true;
         }
         break;
 
       case kEof:
+        //到文件结尾了，没啥完整的记录了，读取逻辑记录失败
         if (in_fragmented_record) {
           // This can be caused by the writer dying immediately after
           // writing a physical record but before completing the next; don't
@@ -165,6 +184,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         return false;
 
       case kBadRecord:
+        //记录有问题，例如crc校验失败了，或者记录中的用户数据长度为0，返回失败
         if (in_fragmented_record) {
           ReportCorruption(scratch->size(), "error in middle of record");
           in_fragmented_record = false;
@@ -202,23 +222,24 @@ void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
   }
 }
 
-//从文件里读取出一个kBlocksize大小的物理块出来，放在backingstore_里
+//从文件里读取出一个kBlocksize大小的物理块出来，放在backingstore_里, 同时返回type
 unsigned int Reader::ReadPhysicalRecord(Slice* result) {
   while (true) {
-    if (buffer_.size() < kHeaderSize) { //如果之前读取的内容不够kHeaderSize大小的话
+    if (buffer_.size() < kHeaderSize) { //如果之前读取的内容不够kHeaderSize大小的话，第一次进入该函数也会进入到该逻辑中
       if (!eof_) { //如果上次读取没有到末尾的话，那么认为上次读取无效，直接忽略
         // Last read was a full read, so this is a trailer to skip
         buffer_.clear();
-        //忽略之后，重新读取一个新块
+        //忽略之后，重新读取一个新块，新块内容是buffer_
         Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
         end_of_buffer_offset_ += buffer_.size(); //缓存块偏移指向这个块的结尾
         if (!status.ok()) { //如果读取失败
           buffer_.clear();
           ReportDrop(kBlockSize, status);
           eof_ = true;
-          return kEof; //返回结尾
+          return kEof; //读取失败则返回结尾
         } else if (buffer_.size() < kBlockSize) { 
-          //读取成功，但已经达到结尾了，重新判断读取的是否为正确的记录。如果没有读取正确的记录（<kHeaderSize），
+          //读取成功，但已经达到文件结尾了（因为要读取32k却没读到这么多，肯定是达到结尾了）
+          //，重新判断读取的是否为正确的记录。如果没有读取正确的记录（<kHeaderSize），
           //那么会进入下面的错误逻辑，否则进入正常逻辑
           eof_ = true;
         }
@@ -233,16 +254,20 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
-    //假设到这里的话，我们已经读取一个完整的block了，解析记录头
+    //走到这里的话，那么肯定buffer.size>kHeaderSize并且buffer.size>=kBlockSize，否则会一直continue回到循环的开始处的
+    //即假设到这里的话，我们已经读取一个完整的block了，解析记录头
     // Parse the header
     const char* header = buffer_.data();
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
     const unsigned int type = header[6]; //记录类型
     const uint32_t length = a | (b << 8);//记录长度
-    if (kHeaderSize + length > buffer_.size()) { //如果记录头+长度大于buffer大小，那么读取到的记录有异常
+    //如果记录头+数据长度大于buffer大小，那么读取到的记录肯定有异常
+    if (kHeaderSize + length > buffer_.size()) { 
       size_t drop_size = buffer_.size();
       buffer_.clear();
+      //把读到的异常数据给抛掉
+      //如果还没到文件的结尾，那么读到一个异常记录
       if (!eof_) {
         ReportCorruption(drop_size, "bad record length");
         return kBadRecord;
@@ -250,6 +275,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       // If the end of the file has been reached without reading |length| bytes
       // of payload, assume the writer died in the middle of writing the record.
       // Don't report a corruption.
+      //否则已经到文件结尾了，可能情况是之前的writer写文件时只写header和部分数据，没有写完整
       return kEof;
     }
 
@@ -274,12 +300,14 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
         size_t drop_size = buffer_.size();
         buffer_.clear();
         ReportCorruption(drop_size, "checksum mismatch");
+        //crc校验失败，那么可能此时的length字段有异常，读到的用户数据不可信，整个block数据丢掉
         return kBadRecord;
       }
     }
 
     //buffer_是一块的长度，当读取结束一条记录时
     //buffer_指向内容的指针向前移动KheaderSize+length，即下一条记录的起始地址
+    //此时buffer_指向下条记录的开始。
     buffer_.remove_prefix(kHeaderSize + length);
 
     // Skip physical record that started before initial_offset_
@@ -290,8 +318,9 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       return kBadRecord;
     }
 
-    //获取记录内容部分
+    //将一条记录的用户数据赋值给result，即起始地址是header+7字节，长度是用户数据的长度
     *result = Slice(header + kHeaderSize, length);
+    //返回获取到的这条记录的类型
     return type;
   }
 }
