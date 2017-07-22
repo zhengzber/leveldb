@@ -56,7 +56,8 @@ struct TableBuilder::Rep {
         filter_block(opt.filter_policy == NULL ? NULL
                      : new FilterBlockBuilder(opt.filter_policy)),
         pending_index_entry(false) {
-    //里面存放的key是全量
+    //里面存放的key是全量，即用BlockBuilder来构造index block，只要把interval设置为1，即每个记录放的是完整的key和value
+    //不存在共享key
     index_block_options.block_restart_interval = 1;
   }
 };
@@ -64,7 +65,7 @@ struct TableBuilder::Rep {
 TableBuilder::TableBuilder(const Options& options, WritableFile* file)
     : rep_(new Rep(options, file)) {
   if (rep_->filter_block != NULL) {
-    rep_->filter_block->StartBlock(0);
+    rep_->filter_block->StartBlock(0);//构造开始时，开始一个filter item
   }
 }
 
@@ -87,7 +88,7 @@ Status TableBuilder::ChangeOptions(const Options& options) {
   // will automatically pick up the updated options.
   rep_->options = options;
   rep_->index_block_options = options;
-  rep_->index_block_options.block_restart_interval = 1;
+  rep_->index_block_options.block_restart_interval = 1;//index block的restart_interval必须为1,，任何option都不能改变这个不变量
   return Status::OK();
 }
 
@@ -96,7 +97,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   Rep* r = rep_;
   assert(!r->closed);
   if (!ok()) return;
-  //// 确保按照顺序操作.
+  //// 确保按照顺序操作.如果已经插入了key，那么当前插入的key必须比之前插入的key要大
   if (r->num_entries > 0) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
@@ -130,8 +131,9 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   r->data_block.Add(key, value);//数据块添加记录
   
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
+  //如果当前data block的大小超过设定的值，那么刷新到磁盘
   if (estimated_block_size >= r->options.block_size) {
-    Flush();//当这个数据块的数据量大于预先设置的值时，刷新到磁盘
+    Flush();
   }
 }
 
@@ -168,12 +170,12 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   // TODO(postrelease): Support more compression options: zlib?
   switch (type) {
     case kNoCompression:
-      block_contents = raw;
+      block_contents = raw;//不压缩
       break;
 
     case kSnappyCompression: {
       std::string* compressed = &r->compressed_output;
-      // 尝试使用snappy compress.如果压缩更大的话那么放弃.
+      // 尝试使用snappy compress.如果压缩超过12.5%的数据量的话，选择压缩后的数据。
       if (port::Snappy_Compress(raw.data(), raw.size(), compressed) &&
           compressed->size() < raw.size() - (raw.size() / 8u)) {
         block_contents = *compressed;
@@ -197,7 +199,7 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
                                  CompressionType type,
                                  BlockHandle* handle) {
   Rep* r = rep_;
-  handle->set_offset(r->offset);//设置当前块的偏移量 即 // 设置handle为block的位置.
+  handle->set_offset(r->offset);//设置当前块的偏移量，即设置index block的handle内容。
   handle->set_size(block_contents.size());//设置当前块的大小
   r->status = r->file->Append(block_contents);//将内容写进用户态缓冲区
   if (r->status.ok()) {
@@ -207,7 +209,7 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
     crc = crc32c::Extend(crc, trailer, 1);  // Extend crc to cover block type
     EncodeFixed32(trailer+1, crc32c::Mask(crc));
     r->status = r->file->Append(Slice(trailer, kBlockTrailerSize));
-    //写进一个块，这时sst文件偏移量增加
+    //写进一个块，这时sst文件偏移量增加，未增加前表示上个data_block的结束位置
     if (r->status.ok()) {
       r->offset += block_contents.size() + kBlockTrailerSize;
     }
@@ -218,6 +220,7 @@ Status TableBuilder::status() const {
   return rep_->status;
 }
 
+//sst写完成函数，用于上层调用
 Status TableBuilder::Finish() {
   Rep* r = rep_;
   Flush();//刷新最后的数据
