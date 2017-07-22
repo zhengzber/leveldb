@@ -41,7 +41,8 @@ struct Options;
 //构造一个data block，将多个有序的kv写到一个连续内存块中。提供的reset接口允许BlockBuilder重复使用，底层对key的prefix部分进行了压缩
 //对于每K个key的话会保存一个完整key,然后对于 剩余的K-1个key采用prefix-compressed的方式压缩。共享的部分长度叫做shared_bytes,
  //非共享的部分叫做unshared_bytes. 对于保存这些完整的key的点，叫做restarts
- //个人理解这个类主要是用来构造data block的
+ //个人理解这个类主要是用来构造data block的： Each data block is formatted according to the code in block_builder.cc, /
+ //and then optionally compressed.
 class BlockBuilder {
  public:
   explicit BlockBuilder(const Options* options);
