@@ -26,7 +26,7 @@ void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
   uint64_t filter_index = (block_offset / kFilterBase);
   assert(filter_index >= filter_offsets_.size());
   //假设filter_index=3, 那么block_offset对应的数据将映射到filter3。假设filter_offsets.size=1，即当前只有1个filter1
-  //那么调用GenerateFilter来创建出filter2, filter3
+  //那么调用GenerateFilter来创建出filter2, filter3，这个循环终止的条件是filter_offsets.size()==filter_index
   while (filter_index > filter_offsets_.size()) {
     //创建filter条目
     GenerateFilter();
@@ -41,7 +41,8 @@ void FilterBlockBuilder::AddKey(const Slice& key) {
   keys_.append(k.data(), k.size());
 }
 
-//搞定一个filter block(meta block)
+//搞定一个filter block（包含filter1, filter2....filtern filer1-offset, filter2-offset...filtern-offset, gbase）
+//向上层函数返回这个meta block的内容
 Slice FilterBlockBuilder::Finish() {
   //如果start_不为空，那么最后一个filter还没写完，此时生成一个filter将剩下的key写进去
   if (!start_.empty()) {
