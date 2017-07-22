@@ -38,9 +38,10 @@ namespace leveldb {
 
 struct Options;
 
-//构造一个块的，将多个有序的kv写到一个连续内存块中。提供的reset接口允许BlockBuilder重复使用，底层对key的prefix部分进行了压缩
+//构造一个data block，将多个有序的kv写到一个连续内存块中。提供的reset接口允许BlockBuilder重复使用，底层对key的prefix部分进行了压缩
 //对于每K个key的话会保存一个完整key,然后对于 剩余的K-1个key采用prefix-compressed的方式压缩。共享的部分长度叫做shared_bytes,
  //非共享的部分叫做unshared_bytes. 对于保存这些完整的key的点，叫做restarts
+ //个人理解这个类主要是用来构造data block的
 class BlockBuilder {
  public:
   explicit BlockBuilder(const Options* options);
@@ -75,7 +76,7 @@ class BlockBuilder {
                                     //判断两个Restart节点之间，记录数量是否小于option定义的值
   std::string           buffer_;      // Destination buffer 这个块的所有数据，数据一条一条添加到这个string中
   std::vector<uint32_t> restarts_;    // Restart points 存储每个restart[i], restart[i]记录的是相对索引，即restart[0]=0第一条非共享记录的地址是0
-  //restart[i]=t表示第i个非共享记录的起始地址是当前块的地址+t
+  //restart[i]=t表示第i个非共享记录的起始地址是当前块的地址+t，即存的offset是相对地址
   int                   counter_;     // Number of entries emitted since restart 两个restart之间记录的条数
   bool                  finished_;    // Has Finish() been called? 是否调用finish，即是否写完这个块
   std::string           last_key_;    //每次写记录时的上一条记录，用于提供共享记录部分
