@@ -61,7 +61,7 @@ struct LRUHandle {
   Slice key() const {
     // For cheaper lookups, we allow a temporary Handle object
     // to store a pointer to a key in "value".
-    //为了加速查询，有时候将key存放在valu中（当前节点的next指向自己时）
+    //为了加速查询，有时候将key的地址存储在value中，所以Slice* value就是key的地址，再取*就是key的内容
     if (next == this) {
       return *(reinterpret_cast<Slice*>(value));
     } else {
@@ -74,7 +74,7 @@ struct LRUHandle {
 // of porting hacks and is also faster than some of the built-in hash
 // table implementations in some of the compiler/runtime combinations
 // we have tested.  E.g., readrandom speeds up by ~5% over the g++
-// 4.4.3's builtin hashtable.
+//注意，每个节点的类型都是LRUHandle*，所以LRUHandle**是节点的地址
 class HandleTable {
  public:
   //先是对成员初始化，然后调用Resize()，因为一开始没有哈希表，所以先给哈希表分配存储空间。
@@ -82,17 +82,19 @@ class HandleTable {
   HandleTable() : length_(0), elems_(0), list_(NULL) { Resize(); }
   ~HandleTable() { delete[] list_; }
 
+  //返回找到的节点（节点类型就是LRUHandle*)
   LRUHandle* Lookup(const Slice& key, uint32_t hash) {
     return *FindPointer(key, hash);
   }
 
   //h将会替换*ptr的位置，返回旧的节点（该节点会从哈希表中删除）
   LRUHandle* Insert(LRUHandle* h) {
-    LRUHandle** ptr = FindPointer(h->key(), h->hash); //查找要插入节点的位置
-    LRUHandle* old = *ptr;
+    LRUHandle** ptr = FindPointer(h->key(), h->hash); //查找要插入节点的位置，返回的是找到节点的指针
+    LRUHandle* old = *ptr; //老的节点
     //将h替换原来节点的位置
-    h->next_hash = (old == NULL ? NULL : old->next_hash);
-    *ptr = h;
+    h->next_hash = (old == NULL ? NULL : old->next_hash); //找到节点的next指向
+    *ptr = h; //这个更新相当于更新previous节点的next指针指向新节点（其实previous节点的指向不变，不过指向的内容已经变为新节点了）
+    //如果旧节点之前不存在，那么增加节点数量，可能要resize调整数组的大小
     if (old == NULL) {
       //此时不存在相等的节点，元素个数++
       ++elems_;
@@ -111,7 +113,7 @@ class HandleTable {
     LRUHandle** ptr = FindPointer(key, hash);//查找要删除的节点位置
     LRUHandle* result = *ptr;//把要删除的节点地址赋值给result
     if (result != NULL) {
-      *ptr = result->next_hash;//删除节点的位置赋值给删除节点的下一个节点
+      *ptr = result->next_hash;//将previous节点的Next_hash指向删除节点的下个节点
       --elems_;
     }
     return result;
@@ -122,14 +124,16 @@ class HandleTable {
   // a linked list of cache entries that hash into the bucket.
   uint32_t length_; //哈希数组的长度，即slot个数
   uint32_t elems_; //哈希数组存储元素的数量
-  LRUHandle** list_; //哈希数组指针，因为数组里的元素是指针，所以类型是指针的指针
+  LRUHandle** list_; //哈希数组指针，因为数组里的元素是指针（元素是单链表的表头，单链表把冲突的元素给串起来），所以类型是指针的指针
   
   // Return a pointer to slot that points to a cache entry that
   // matches key/hash.  If there is no such cache entry, return a
   // pointer to the trailing slot in the corresponding linked list.
   //在哈希表中，根据key和hash来找到LRUHandle*。
-  //找到一个非空节点，并且该接的hash值和key都等于参数，返回这个节点的地址的地址
-  //如果没找到的话，那么返回的是*ptr=NULL,这个ptr指向的是哈希数组的slot链表中的最后一个节点的下个NULL节点，可作为insert节点使用
+  //找到一个非空节点，并且该接的hash值和key都等于参数，返回这个节点的地址（因为数组中元素类型是LRUHandle*，所以返回的LRUHandle**就是返回
+  //了元素的地址）
+  //如果没找到的话，那么返回的是*ptr=NULL，如果hash到的单链表为空，那么返回的slot的元素地址即数组中元素地址；如果单链表不为空，且
+  //最后一个节点为LRUHandle* tail，那么返回的是&(tail->next_hash)，虽然tail->next_hash==NULL
   LRUHandle** FindPointer(const Slice& key, uint32_t hash) {
     LRUHandle** ptr = &list_[hash & (length_ - 1)];
     while (*ptr != NULL &&
@@ -151,10 +155,16 @@ class HandleTable {
     memset(new_list, 0, sizeof(new_list[0]) * new_length);//初始全为0
     uint32_t count = 0;
     for (uint32_t i = 0; i < length_; i++) {
-      LRUHandle* h = list_[i]; //h为数组slot(i)的元素
+      LRUHandle* h = list_[i]; //h为数组slot(i)的元素，即单链表的表头
+      //遍历第i的单链表
       while (h != NULL) {
-        LRUHandle* next = h->next_hash; //当前节点的下一个节点
+        LRUHandle* next = h->next_hash; //单链表的下个节点
         uint32_t hash = h->hash; //当前节点的hash值
+        /*接下来的三句内容其实也等于：
+        *LRUHandle* ptr = new_list[hash& (new_length - 1)];
+        *h->next_hash = ptr;
+        *new_list[hash& (new_length - 1)] = h;
+        */
         LRUHandle** ptr = &new_list[hash & (new_length - 1)];//当前节点在新哈希数组的索引位置
         h->next_hash = *ptr;//头插入，将当前节点插入哈希数组的头部位置
         *ptr = h; //调整哈希数组的头部位置
@@ -164,8 +174,8 @@ class HandleTable {
     }
     assert(elems_ == count); //rehash处理的元素个数应该等于以前哈希表的元素个数
     delete[] list_; //删除老的哈希数组
-    list_ = new_list;
-    length_ = new_length;
+    list_ = new_list;//更新数组
+    length_ = new_length;//更新数据长度即数组中slot个数
   }
 };
 
