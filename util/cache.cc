@@ -78,7 +78,7 @@ struct LRUHandle {
 class HandleTable {
  public:
   //先是对成员初始化，然后调用Resize()，因为一开始没有哈希表，所以先给哈希表分配存储空间。
-  //第一次分配时，哈希数组长度为4，当后面元素数量大于哈希表长度时，再次分配哈希表大小为现在数组长度的2倍。 
+  //第一次分配时，哈希数组长度为4，当后面 元素数量大于哈希表长度时，再次分配哈希表大小为现在数组长度的2倍。 
   HandleTable() : length_(0), elems_(0), list_(NULL) { Resize(); }
   ~HandleTable() { delete[] list_; }
 
@@ -113,7 +113,7 @@ class HandleTable {
     LRUHandle** ptr = FindPointer(key, hash);//查找要删除的节点位置
     LRUHandle* result = *ptr;//把要删除的节点地址赋值给result
     if (result != NULL) {
-      *ptr = result->next_hash;//将previous节点的Next_hash指向删除节点的下个节点
+      *ptr = result->next_hash;
       --elems_;
     }
     return result;
