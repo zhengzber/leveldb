@@ -15,9 +15,9 @@
 
 namespace leveldb {
 
-//从之前的BloclBuilder知道restart个数在最后面的4字节 
+//一个DataBlock中，最后4字节是放num_restarts的，拿出最后4字节，解析成整数返回。
 inline uint32_t Block::NumRestarts() const {
-  assert(size_ >= sizeof(uint32_t));
+  assert(size_ >= sizeof(uint32_t)); 
   return DecodeFixed32(data_ + size_ - sizeof(uint32_t));
 }
 
@@ -29,12 +29,13 @@ Block::Block(const BlockContents& contents)
     size_ = 0;  // Error marker
   } else {
     size_t max_restarts_allowed = (size_-sizeof(uint32_t)) / sizeof(uint32_t); //除去最后一个restart个数的4字节，当前data block有多少个4字节
-    // size太小
+    // 如果当前num_restarts大于最多可以允许的个数，那么说明当前size有点问题，
     if (NumRestarts() > max_restarts_allowed) {
       // The size is too small for NumRestarts()
       size_ = 0;
     } else {
       //如果了解一个data block的布局，就知道重启点为啥是如下计算了。
+      //第一个重启点的位置
       restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t); 
     }
   }
@@ -86,13 +87,14 @@ class Block::Iter : public Iterator {
   const char* const data_;      // underlying block contents  data block的内容
   uint32_t const restarts_;     // Offset of restart array (list of fixed32) // 重启点数组的首地址
   uint32_t const num_restarts_; // Number of uint32_t entries in restart array //重启点个数
+  //以上参数由Block传入，赋值后就不再变化
   
   // current_ is offset in data_ of current entry.  >= restarts_ if !Valid
   //// current_ 指向正在读取的记录的偏移
   uint32_t current_; //当前记录偏移
   uint32_t restart_index_;  // Index of restart block in which current_ falls // 当前记录所在重启点区域
-  std::string key_; //当前记录的键， 这里key需要单独保存,因为我们使用了prefix-compressed.
-  Slice value_; //当前记录的值
+  std::string key_; //上条记录的键值，需要保存起来，因为是prefix-compressed，可能当前记录和上条记录有shared part
+  Slice value_; //上条记录的值
   Status status_; //当前迭代器的状态
   inline int Compare(const Slice& a, const Slice& b) const {
     return comparator_->Compare(a, b);
@@ -103,20 +105,21 @@ class Block::Iter : public Iterator {
     return (value_.data() + value_.size()) - data_;
   }
 
-  //得到某个index的restart offset.这个直接访问最后的restart可以得到. 
+  //找到index restart，将它的4字节解析出来，就是记录对应的offset
   uint32_t GetRestartPoint(uint32_t index) {
     assert(index < num_restarts_);
+    //数据首地址+restarts的offset+当前第几个restart point
     return DecodeFixed32(data_ + restarts_ + index * sizeof(uint32_t));
   }
 
   void SeekToRestartPoint(uint32_t index) {
     key_.clear();//一开始key_为空
-    restart_index_ = index;//当前记录所在重启点索引为0
+    restart_index_ = index;//设置当前所在record的重启点的所以，如果index=0那么就是0即第一个记录
     // current_ will be fixed by ParseNextKey();
 
     // ParseNextKey() starts at the end of value_, so set value_ accordingly
     uint32_t offset = GetRestartPoint(index);//找到这个索引重启点的偏移量
-    value_ = Slice(data_ + offset, 0);//value_一开始指向记录的首位置
+    value_ = Slice(data_ + offset, 0);//value_指向第index个restart对应的记录的首地址
   }
 
  public:
