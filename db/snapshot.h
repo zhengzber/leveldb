@@ -18,6 +18,10 @@ Snapshot实现非常简单，就是一个双向链表的节点，然后挂在一
 我们可以猜想对于每次插入的key都会带上一个seq number.这样如果对snapshot操作的话读取的话，
 那么只需要读取seq number以下的内容即可了。 
 */ 
+ /*
+ 快照节点里仅仅包含一个sequence number，然后挂在快照的双向链表中，链表的dummpy head的prev节点是最新的
+ next节点是最旧的，因为leveldb里每个key都有一个sequence number，可根据快照的sequence number查找出当时的key对应的value是啥
+ */
  
 // Snapshots are kept in a doubly-linked list in the DB.
 // Each SnapshotImpl corresponds to a particular sequence number.
@@ -38,6 +42,7 @@ class SnapshotImpl : public Snapshot {
 };
 
 //双向链表
+//这个是SnapShot实现类也就是dbimpl中操作的快照类，每生成一个快照时，要插入双向链表中，
 class SnapshotList {
  public:
   SnapshotList() {
