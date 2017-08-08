@@ -21,6 +21,11 @@ Snapshot实现非常简单，就是一个双向链表的节点，然后挂在一
  /*
  快照节点里仅仅包含一个sequence number，然后挂在快照的双向链表中，链表的dummpy head的prev节点是最新的
  next节点是最旧的，因为leveldb里每个key都有一个sequence number，可根据快照的sequence number查找出当时的key对应的value是啥
+ 
+ leveldb的快照主要功能是用来读取某个时间点之前的数据，因为leveldb在插入数据时，键值是可以一样的，
+ 所以当查询这个键值时，系统返回的是最新的数据，
+ 也就是后面插入的数据。但是如果在第二次插入相同键值数据之前，建立一个快照，那么读取这个快照时，
+ 读取的就是这个快照时间点之前的数据。
  */
  
 // Snapshots are kept in a doubly-linked list in the DB.
