@@ -14,33 +14,40 @@ class MemTable;
 
 // WriteBatchInternal provides static methods for manipulating a
 // WriteBatch that we don't want in the public WriteBatch interface.
+//这个类主要作用就是操作WriteBatch的字符串，比如取出/设置序列号，取出/设置记录数，将WriteBatch插入memtable等等。
 class WriteBatchInternal {
  public:
   // Return the number of entries in the batch.
+ ////获得这个WriteBatch的记录数
   static int Count(const WriteBatch* batch);
 
   // Set the count for the number of entries in the batch.
+ //设置这个WriteBatch的记录数
   static void SetCount(WriteBatch* batch, int n);
 
   // Return the sequence number for the start of this batch.
+ //返回这个writebatch的序列号
   static SequenceNumber Sequence(const WriteBatch* batch);
 
   // Store the specified number as the sequence number for the start of
   // this batch.
+ ////设置这个WriteBatch的序列号
   static void SetSequence(WriteBatch* batch, SequenceNumber seq);
 
+ //获得这个WriteBatch的所有内容
   static Slice Contents(const WriteBatch* batch) {
     return Slice(batch->rep_);
   }
-
+ //获得这个WriteBatch的记录总和大小
   static size_t ByteSize(const WriteBatch* batch) {
     return batch->rep_.size();
   }
 
+ //设置这个WriteBatch的内容
   static void SetContents(WriteBatch* batch, const Slice& contents);
-
+//将这个WriteBatch的所有记录添加进memtable
   static Status InsertInto(const WriteBatch* batch, MemTable* memtable);
-
+//将src中的所有记录添加进dst中
   static void Append(WriteBatch* dst, const WriteBatch* src);
 };
 
