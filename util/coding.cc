@@ -6,9 +6,9 @@
 
 namespace leveldb {
 
-//将uint32_t的每个字节放入一个char即可
+//将uint32_t的每个字节放入一个char即可。低地址处放value的低位
 void EncodeFixed32(char* buf, uint32_t value) {
-  if (port::kLittleEndian) { //小端直接复制字节即可
+  if (port::kLittleEndian) { //小端：低位放入内存低地址处，直接复制字节即可
     memcpy(buf, &value, sizeof(value));
   } else {
     //如果是大端，则一个一个字节的复制
