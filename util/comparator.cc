@@ -68,14 +68,16 @@ the first block and  < all entries in subsequent blocks。实现细节：先找�
     }
   }
 
+ //找到一个比key大的最短的字符串，并且就地改为key
+ //把key修改成一个比key大的短字符串，实现方法是顺着key的第一个字符找，直到找到一个不是0xff的字符然后把该字符加1，并截断
   virtual void FindShortSuccessor(std::string* key) const {
     // Find first character that can be incremented
     size_t n = key->size();
     for (size_t i = 0; i < n; i++) {
       const uint8_t byte = (*key)[i];
-      if (byte != static_cast<uint8_t>(0xff)) {
-        (*key)[i] = byte + 1;
-        key->resize(i+1);
+      if (byte != static_cast<uint8_t>(0xff)) { //找到第一个不是0xff的字符
+        (*key)[i] = byte + 1; //将该字符加1
+        key->resize(i+1);//然后做截断
         return;
       }
     }
