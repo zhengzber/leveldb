@@ -175,7 +175,7 @@ struct ReadOptions {
   // Should the data read for this iteration be cached in memory?
   // Callers may wish to set this field to false for bulk scans.
   // Default: true
-  bool fill_cache; //是否需要从cache里面查找.如果是bulk scans的话那么设置false.
+  bool fill_cache; //是否将本次读取到的内容填充到cache
 
   // If "snapshot" is non-NULL, read as of the supplied snapshot
   // (which must belong to the DB that is being read and which must
