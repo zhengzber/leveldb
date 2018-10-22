@@ -138,6 +138,8 @@ class HandleTable {
     LRUHandle** ptr = &list_[hash & (length_ - 1)];
     while (*ptr != NULL &&
            ((*ptr)->hash != hash || key != (*ptr)->key())) {
+     //这里必须判断hash和key都相同才算找到，因为不同hash可能映射到同一个slot，所以一个slot下的hash可能并不同，必须同时
+     //判断hash和key
       ptr = &(*ptr)->next_hash;
     }
     return ptr;
