@@ -33,7 +33,9 @@ Writer::Writer(WritableFile* dest, uint64_t dest_length)
 Writer::~Writer() {
 }
 
-//根据用户的slice产生一条record
+//根据用户的slice产生多条record
+//如果当前block剩余的字节够写slice 那么全部当走一个fulltype的record写进去
+//否则先写一部分当作其它类型的record，然后开辟新的block继续处理剩下的字节
 Status Writer::AddRecord(const Slice& slice) {
   const char* ptr = slice.data();//记录数据起始地址
   size_t left = slice.size();//记录数据长度
