@@ -229,20 +229,23 @@ void Reader::ReportDrop(uint64_t bytes, const Status& reason) {
   }
 }
 
-//从文件里读取出一个kBlocksize大小的物理块出来，放在backingstore_里, 同时返回type
+//从buffer（指向backing_store)中读取一个record，如果当前buffer没有啥内容了或者内容不够了例如小于7字节，那么从
+//日志文件中读取一个32k的block到backing_store中并让buffer指向它，返回type
 unsigned int Reader::ReadPhysicalRecord(Slice* result) {
   while (true) {
     if (buffer_.size() < kHeaderSize) { //如果之前读取的内容不够kHeaderSize大小的话，第一次进入该函数也会进入到该逻辑中
-      if (!eof_) { //如果上次读取没有到末尾的话，那么认为上次读取无效，直接忽略
+      if (!eof_) { 
+        //如果尚未读取到文件末尾，那么尝试从日志文件中读取一个block出来
         // Last read was a full read, so this is a trailer to skip
-        buffer_.clear();
-        //忽略之后，重新读取一个新块，新块内容是buffer_
+        buffer_.clear();//先清空当前buffer
+        //读取一个32的block到backing_store中，buffer指向这个backing_store
         Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
-        end_of_buffer_offset_ += buffer_.size(); //缓存块偏移指向这个块的结尾
-        if (!status.ok()) { //如果读取失败
-          buffer_.clear();
+      
+        end_of_buffer_offset_ += buffer_.size(); //更新Buffer的末尾
+        if (!status.ok()) { //如果读取失败，那么认为日志文件有问题，抛弃该日志文件
+          buffer_.clear();//清空buffer
           ReportDrop(kBlockSize, status);
-          eof_ = true;
+          eof_ = true;//设置为已到文件结尾
           return kEof; //读取失败则返回结尾
         } else if (buffer_.size() < kBlockSize) { 
           //读取成功，但已经达到文件结尾了（因为要读取32k却没读到这么多，肯定是达到结尾了）
@@ -269,7 +272,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
     const unsigned int type = header[6]; //记录类型
     const uint32_t length = a | (b << 8);//记录长度
-    //如果记录头+数据长度大于buffer大小，那么读取到的记录肯定有异常
+    //如果记录头+数据长度大于buffer大小，那么读取到的记录肯定有异常，丢掉buffer大小的内容
     if (kHeaderSize + length > buffer_.size()) { 
       size_t drop_size = buffer_.size();
       buffer_.clear();
@@ -318,7 +321,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     buffer_.remove_prefix(kHeaderSize + length);
 
     // Skip physical record that started before initial_offset_
-    //跳过初始地址之前的记录
+    //跳过block_start_location到initial_offset之间的record
     if (end_of_buffer_offset_ - buffer_.size() - kHeaderSize - length <
         initial_offset_) {
       result->clear();
