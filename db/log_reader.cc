@@ -51,6 +51,8 @@ bool Reader::SkipToInitialBlock() {
   end_of_buffer_offset_ = block_start_location;
 
   // Skip to start of first block that can contain the initial record
+  //说明initial_offset是大于等于32k的，构造函数传入的日志文件游标在起始处，此时需要跳到block的起始处
+  //所以skip到block_start_location
   if (block_start_location > 0) {
     Status skip_status = file_->Skip(block_start_location);
     if (!skip_status.ok()) {
@@ -65,8 +67,11 @@ bool Reader::SkipToInitialBlock() {
 //读取一条逻辑记录，底层调用ReadPhysicalRecord将多条物理记录结合起来。
 //对于FullType来说的话record里面使用backing_store内存，而对于First/Middle/Last来说的话 里面使用的是scratch分配的内存
 //读取一条完整的逻辑记录给用户，逻辑记录放在record中，scratch是用于拼接记录的第一部分、中间部分和最后部分数据用的
+//因为每次都从文件读一个32k的block到backing_store进而放入buffer中，如果是个kFullType说明逻辑record是小于32k的
+//用backing_store来支持内存就足够，如果是kFirstType|kMiddleTYpe|kLastType，那么一个32k的block可能并不够存放逻辑记录的
+//所以借用scratch来存放数据
 bool Reader::ReadRecord(Slice* record, std::string* scratch) {
-  //如果上条记录的偏移量小于初始化读取偏移量，那么跳到第一个block处（即从initial_offset开始的往下找到的第一个block)
+  //如果上条记录的偏移量小于初始化读取偏移量，那么跳到第一个block处（即跳到initial_offset所在的block的起始处)
   if (last_record_offset_ < initial_offset_) {
     if (!SkipToInitialBlock()) {
       return false;
@@ -82,7 +87,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
 
   Slice fragment;
   while (true) {
-    //尝试读一条记录，记录的用户数据赋值到fragment中，其实整个块的内存是在backing_store中
+    //尝试读一条记录，记录的用户数据赋值到fragment中，其实整个块的内存是在backing_store中，fragment的内存也是放在backing_store中的
     const unsigned int record_type = ReadPhysicalRecord(&fragment);
 
     // ReadPhysicalRecord may have only had an empty trailer remaining in its
@@ -184,7 +189,9 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         return false;
 
       case kBadRecord:
-        //记录有问题，例如crc校验失败了，或者记录中的用户数据长度为0，返回失败
+        //记录有问题，例如crc校验失败了，或者记录中的用户数据长度为0
+        //或者读到的block_start_location到Initial_offset之间的record
+        //都break跳过这个record，然后走到while(true)循环继续尝试读取下个逻辑record
         if (in_fragmented_record) {
           ReportCorruption(scratch->size(), "error in middle of record");
           in_fragmented_record = false;
