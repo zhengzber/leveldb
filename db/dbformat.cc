@@ -101,6 +101,7 @@ void InternalKeyComparator::FindShortSuccessor(std::string* key) const {
   Slice user_key = ExtractUserKey(*key);
   std::string tmp(user_key.data(), user_key.size());
   user_comparator_->FindShortSuccessor(&tmp); //基于user-key的user-comparator找到一个short successor tmp
+  //如果tmp确实比较短，并且比较user_key大，那么将max sequence number和value_type拼接到tmp后面
   if (tmp.size() < user_key.size() &&
       user_comparator_->Compare(user_key, tmp) < 0) {
     // User key has become shorter physically, but larger logically.
@@ -119,37 +120,39 @@ void InternalFilterPolicy::CreateFilter(const Slice* keys, int n,
                                         std::string* dst) const {
   // We rely on the fact that the code in table.cc does not mind us
   // adjusting keys[].
-  Slice* mkey = const_cast<Slice*>(keys);
+  Slice* mkey = const_cast<Slice*>(keys); //
   for (int i = 0; i < n; i++) {
-    mkey[i] = ExtractUserKey(keys[i]);
+    mkey[i] = ExtractUserKey(keys[i]);//将keys[i]的user-key抽取出来
     // TODO(sanjay): Suppress dups?
   }
-  user_policy_->CreateFilter(keys, n, dst);
+  user_policy_->CreateFilter(keys, n, dst);//基于user-key来创建filter
 }
 
+//基于user-key的policy来进行key_may_match
 bool InternalFilterPolicy::KeyMayMatch(const Slice& key, const Slice& f) const {
   return user_policy_->KeyMayMatch(ExtractUserKey(key), f);
 }
 
+//基于user-key, sequence和type来构建LookupKey
 LookupKey::LookupKey(const Slice& user_key, SequenceNumber s) {
   size_t usize = user_key.size();
-  //kLength占5个字节，sequence number和value_type
-  size_t needed = usize + 13;  // A conservative estimate
+  //kLength是varint32，最多占5个字节，sequence number和value_type
+  size_t needed = usize + 13;  // A conservative estimate，总共需要usize+13个字节
   char* dst;
   //如果需要的内存小于等于200字节，那么直接使用space_，否则从堆上分配
   //这个设计挺好的，如果内存较小，没必要从堆上分配，直接使用内部的缓存即可，而且200字节也不大，避免了较小的key也从堆上分配的负担
   if (needed <= sizeof(space_)) {
     dst = space_;
   } else {
-    dst = new char[needed];
+    dst = new char[needed];//从堆上分配
   }
   //start_指向整个内存的开始处
   start_ = dst;
-  //将user_key的大小和后面tag的8字节大小累加，放入vaint32中，放在dst的头部5字节中
+  //将internal-key的大小进行encode放入varint32中，放入dst中
   dst = EncodeVarint32(dst, usize + 8);
   //kstart_指向user_key开始的char*
   kstart_ = dst;
-  //将user_key的数据拷贝到这里，此时dst=kstart_=user_key应该开始放置的位置
+  //将user_key的数据拷贝到dst中，此时dst=kstart_=user_key应该开始放置的位置
   memcpy(dst, user_key.data(), usize);
   //跳过user_key的大小，指向tag的起始处
   dst += usize;
