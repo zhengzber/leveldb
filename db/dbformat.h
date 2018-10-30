@@ -100,7 +100,7 @@ extern void AppendInternalKey(std::string* result,
 //首先将internal_key解析成ParsedInternalKey即反序列化出user_key, sequence_num和value_type
 //如果解析正常返回true；如果解析出的数据有异常：例如result没有8个字节或者value_type解析
 //出的类型不合法（既不是普通类型也不是删除类型那么非法）那么返回false
-//即级那个internal_key解析成ParsedInternalKey中
+//即将那个internal_key解析成ParsedInternalKey中
 extern bool ParseInternalKey(const Slice& internal_key,
                              ParsedInternalKey* result);
 
@@ -117,15 +117,16 @@ inline Slice ExtractUserKey(const Slice& internal_key) {
 inline ValueType ExtractValueType(const Slice& internal_key) {
   assert(internal_key.size() >= 8);
   const size_t n = internal_key.size();
-  //将二进制数据的最后8个字节解析成uint64_t
+  //将二进制数据的最后8个字节解析成uint64_t，用的是固定8字节编码
   uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
-  //再取8字节的低8位，就是value_type
+  //再取8字节的低8位，就是value_type，取最低8位
   unsigned char c = num & 0xff;
   return static_cast<ValueType>(c);
 }
 
 // A comparator for internal keys that uses a specified comparator for
 // the user key portion and breaks ties by decreasing sequence number.
+//基于user-key的comparator提供的internal-key的comparator
 class InternalKeyComparator : public Comparator {
  private:
   const Comparator* user_comparator_;//user_key comparator
@@ -135,8 +136,8 @@ class InternalKeyComparator : public Comparator {
   virtual int Compare(const Slice& a, const Slice& b) const;//比较两个InternalKey，优先比较user_key，如果相等那么比较sequence number
   virtual void FindShortestSeparator(
       std::string* start,
-      const Slice& limit) const;
-  virtual void FindShortSuccessor(std::string* key) const;
+      const Slice& limit) const; //找到最短的separator 使得start<=separator<limit
+  virtual void FindShortSuccessor(std::string* key) const; //找到最短的successor是的key<=successor
 
   const Comparator* user_comparator() const { return user_comparator_; }
 
@@ -144,6 +145,7 @@ class InternalKeyComparator : public Comparator {
 };
 
 // Filter policy wrapper that converts from internal keys to user keys
+//基于user-key的filter-policy提供的internal-key的filter-policy
 class InternalFilterPolicy : public FilterPolicy {
  private:
   const FilterPolicy* const user_policy_;
@@ -191,6 +193,7 @@ class InternalKey {
   std::string DebugString() const;
 };
 
+//基于internalkey comparator的compare,使用参数是slice的比较函数
 inline int InternalKeyComparator::Compare(
     const InternalKey& a, const InternalKey& b) const {
   return Compare(a.Encode(), b.Encode());
@@ -200,20 +203,22 @@ inline int InternalKeyComparator::Compare(
 inline bool ParseInternalKey(const Slice& internal_key,
                              ParsedInternalKey* result) {
   const size_t n = internal_key.size();
-  if (n < 8) return false;
-  uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
-  unsigned char c = num & 0xff;
-  result->sequence = num >> 8;
+  if (n < 8) return false; //大小不符合
+  uint64_t num = DecodeFixed64(internal_key.data() + n - 8);//将末尾8字节解析成uint64_t
+  unsigned char c = num & 0xff; //获得uint64_t的低8位，转换成type
+  result->sequence = num >> 8; //获得高56位为sequence number
   result->type = static_cast<ValueType>(c);
-  result->user_key = Slice(internal_key.data(), n - 8);
+  result->user_key = Slice(internal_key.data(), n - 8);//获得user-key
   return (c <= static_cast<unsigned char>(kTypeValue));//value_type是否合法？
 }
 
 // A helper class useful for DBImpl::Get()
+ //LookupKey作为memtable的key
 //LookupKey表示一块内存，放入InternalKey size + InternalKey.起始地址是start_
 //前面最多5个字节（用varint 32_t来编码InternalKey的长度）存放InternalKey size；中间是user_key，起始地址是kstart_
 //最后8个字节的为序列化的sequence number和标识普通类型的value_type
-// start_[后面user_key+8字节的大小](5个字节)+kstart_(user_key的起始地址)...+(最后8字节为sequence_number和普通类型value_type的序列化)end_
+//[start, kstart-1]表示varint32，[kstart, end-8-1]表示user-key，[end-8, end]表示sequence number和type的uint64
+// start_[后面user_key+8字节的大小](最大5个字节)+kstart_(user_key的起始地址)...+(最后8字节为sequence_number和普通类型value_type的序列化)end_
 class LookupKey {
  public:
   // Initialize *this for looking up user_key at a snapshot with
@@ -246,7 +251,7 @@ class LookupKey {
   const char* start_;//整个内存的起始地址
   const char* kstart_;//user_key的起始地址
   const char* end_;//整个内存的末尾的下一个字节
-  char space_[200];      // Avoid allocation for short keys，如果内存够小，那么使用这个内存，否则要用new来分配
+  char space_[200];      // Avoid allocation for short keys，如果[start, end]需要的字节数比较少，那么使用这个内存，否则要用new在堆上来分配
   // No copying allowed
   LookupKey(const LookupKey&);
   void operator=(const LookupKey&);
