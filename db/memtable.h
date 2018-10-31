@@ -19,6 +19,7 @@ class MemTableIterator;
 
 //memtable是代理模式，底层用的存储（放内存中）是skiplist
 // memtable的查询key是LookupKey
+//skiplist存储的key是internal_key_size+internal_key+value_size+value
 class MemTable {
  public:
   // MemTables are reference counted.  The initial reference count
