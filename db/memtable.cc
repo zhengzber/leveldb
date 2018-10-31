@@ -32,7 +32,7 @@ MemTable::~MemTable() {
 
 size_t MemTable::ApproximateMemoryUsage() { return arena_.MemoryUsage(); }//返回内存池的大概内存，skiplist的节点内存需要从arena_中分配
 
-//这里KeyComparator的话因为考虑到key是length-prefixed的，所以先把length从ptr中移去，然后调用comparator去比较字符串（）
+//aptr和bptr都是LookupKey，先移除前面的internal-key-size，然后比较2个internal-key
 int MemTable::KeyComparator::operator()(const char* aptr, const char* bptr)
     const {
   // Internal keys are encoded as length-prefixed strings.
@@ -45,6 +45,7 @@ int MemTable::KeyComparator::operator()(const char* aptr, const char* bptr)
 // Encode a suitable internal key target for "target" and return it.
 // Uses *scratch as scratch space, and the returned pointer will point
 // into this scratch space.
+//将一个internal-key target encode成LookupKey放入scratch中
 static const char* EncodeKey(std::string* scratch, const Slice& target) {
   scratch->clear();
   PutVarint32(scratch, target.size());
@@ -58,14 +59,14 @@ class MemTableIterator: public Iterator {
   explicit MemTableIterator(MemTable::Table* table) : iter_(table) { }
 
   virtual bool Valid() const { return iter_.Valid(); }
-  virtual void Seek(const Slice& k) { iter_.Seek(EncodeKey(&tmp_, k)); }
+  virtual void Seek(const Slice& k) { iter_.Seek(EncodeKey(&tmp_, k)); } //k是internal-key，先encode成LookupKey，然后调用skiplist的Seek在skiplist中查找
   virtual void SeekToFirst() { iter_.SeekToFirst(); }
   virtual void SeekToLast() { iter_.SeekToLast(); }
   virtual void Next() { iter_.Next(); }
   virtual void Prev() { iter_.Prev(); }
-  virtual Slice key() const { return GetLengthPrefixedSlice(iter_.key()); } //返回的是LookupKey
+  virtual Slice key() const { return GetLengthPrefixedSlice(iter_.key()); } //返回的是Internal-key
   virtual Slice value() const {
-    Slice key_slice = GetLengthPrefixedSlice(iter_.key());//LookupKey
+    Slice key_slice = GetLengthPrefixedSlice(iter_.key());//先获得Internal-key
     return GetLengthPrefixedSlice(key_slice.data() + key_slice.size());//返回的是value
   }
 
