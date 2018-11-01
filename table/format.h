@@ -19,6 +19,7 @@ struct ReadOptions;
 
 // BlockHandle is a pointer to the extent of a file that stores a data
 // block or a meta block.
+//封装了数据块的起始地址和大小，uint64采用varint64编码，2个成员最多占用20字节
 class BlockHandle {
  public:
   BlockHandle();
@@ -38,12 +39,13 @@ class BlockHandle {
   enum { kMaxEncodedLength = 10 + 10 };// uint64最大压缩大小为10字节.
 
  private:
-  uint64_t offset_;
-  uint64_t size_;
+  uint64_t offset_;//数据块的起始地址
+  uint64_t size_;//数据块的大小
 };
 
 // Footer encapsulates the fixed information stored at the tail
 // end of every table file.
+//共占用文件尾的48字节，8字节的MagicNumber
 class Footer {
  public:
   Footer() { }
@@ -71,8 +73,8 @@ class Footer {
   };
 
  private:
-  BlockHandle metaindex_handle_;
-  BlockHandle index_handle_;
+  BlockHandle metaindex_handle_;//指向metaindex
+  BlockHandle index_handle_;//指向index
 };
 
 // kTableMagicNumber was picked by running
