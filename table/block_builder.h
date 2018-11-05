@@ -39,7 +39,8 @@ namespace leveldb {
 struct Options;
 
 //构造一个data block，将多个有序的kv写到一个连续内存块中。提供的reset接口允许BlockBuilder重复使用，底层对key的prefix部分进行了压缩
-//对于每K个key的话会保存一个完整key,然后对于 剩余的K-1个key采用prefix-compressed的方式压缩。共享的部分长度叫做shared_bytes,
+//对于每K个key的话会保存一个完整key,然后对于 剩余的K-1个key采用prefix-compressed的方式压缩，每个key和它前面的key进行公共前缀压缩，
+//注意这里，key不是和每K个key的第一个key做压缩。共享的部分长度叫做shared_bytes,
  //非共享的部分叫做unshared_bytes. 对于保存这些完整的key的点，叫做restarts
  //这个BlockBuilder用来构造data block和index block；构造data block很好理解，构造index block就是把block_restart_interval=1，
  //即不存在共享key，每个<key, value>都是一条记录。
@@ -48,18 +49,18 @@ class BlockBuilder {
   explicit BlockBuilder(const Options* options);
 
   // Reset the contents as if the BlockBuilder was just constructed.
-  //重置BlockBuilder的各个属性，便于下一次写
+  //重置BlockBuilder的各个属性，便于下一次重用
   void Reset();
 
   // REQUIRES: Finish() has not been called since the last call to Reset().
   // REQUIRES: key is larger than any previously added key
-  //往当前块添加一条记录
+  //往当前data block添加一条key, value记录
   void Add(const Slice& key, const Slice& value);
 
   // Finish building the block and return a slice that refers to the
   // block contents.  The returned slice will remain valid for the
   // lifetime of this builder or until Reset() is called.
-  //当前块写结束，返回这个块的所有内容，在tablebuilder写入文件
+  //当前块写添加key-value结束，返回这个块的所有内容，在tablebuilder写入文件
   Slice Finish();
 
   // Returns an estimate of the current (uncompressed) size of the block
