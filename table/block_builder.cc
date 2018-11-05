@@ -44,7 +44,7 @@ BlockBuilder::BlockBuilder(const Options* options)
       counter_(0),
       finished_(false) {
   assert(options->block_restart_interval >= 1);
-  //初始将0放入，第一条记录是一个restart point
+  //初始将0放入，第一条记录是一个restart point，注意restarts存储的是相对data block的相对偏移量
   restarts_.push_back(0);       // First restart point is at offset 0
 }
 
@@ -79,6 +79,8 @@ Slice BlockBuilder::Finish() {
 }
 
 //往当前块添加一条记录，key应该比之前添加的key要大（从immenuable table顺序遍历的key是满足这个条件的，因为skiplist有序）
+//注意last_key表示当前待加入key的前一个key，而不是restart point开始的key，所以如果要找到某个位置的key，需要从restart point
+//开始来重建出各个key
 void BlockBuilder::Add(const Slice& key, const Slice& value) {
   Slice last_key_piece(last_key_); //上一条记录
   assert(!finished_); //这个块当前仍未结束，如果结束了外部调用add来添加记录，会报错
