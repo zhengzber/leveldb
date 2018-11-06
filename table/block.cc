@@ -56,7 +56,9 @@ Block::~Block() {
 //
 // If any errors are detected, returns NULL.  Otherwise, returns a
 // pointer to the key delta (just past the three decoded values).
-//从头部decode出shared,non_shared以及value_length.这里面为了加快判断的话有一个技巧.返回的是下一个要读取的地址. 
+//从头部decode出shared,non_shared以及value_length.这里面为了加快判断的话有一个技巧.
+//如果p的前面3个字节，每个字节的最高位都是0，那么说明1个字节就够varint32了
+//这里用或的方式来判断每个字节的最高位
 static inline const char* DecodeEntry(const char* p, const char* limit,
                                       uint32_t* shared,
                                       uint32_t* non_shared,
@@ -101,6 +103,7 @@ class Block::Iter : public Iterator {
   }
 
   // Return the offset in data_ just past the end of the current entry.
+  //下个key-value的偏移量
   inline uint32_t NextEntryOffset() const {
     return (value_.data() + value_.size()) - data_;
   }
@@ -112,9 +115,10 @@ class Block::Iter : public Iterator {
     return DecodeFixed32(data_ + restarts_ + index * sizeof(uint32_t));
   }
 
+  //跳到第index个restart处，清空key，value指向这个restart的起始位置
   void SeekToRestartPoint(uint32_t index) {
     key_.clear();//一开始key_为空
-    restart_index_ = index;//设置当前所在record的重启点的所以，如果index=0那么就是0即第一个记录
+    restart_index_ = index;//设置当前所在record的重启点，如果index=0那么就是0即第一个记录
     // current_ will be fixed by ParseNextKey();
 
     // ParseNextKey() starts at the end of value_, so set value_ accordingly
@@ -131,8 +135,8 @@ class Block::Iter : public Iterator {
         data_(data),
         restarts_(restarts),
         num_restarts_(num_restarts),
-        current_(restarts_),//当前记录指向重启点数组的首位置，表示无效
-        restart_index_(num_restarts_) {//当前记录所在重启点索引=重启点个数，表示无效
+        current_(restarts_),//当前记录指向重启点数组的首位置，表示无效，有效值是[0，restarts-1]
+        restart_index_(num_restarts_) {//当前记录所在重启点索引=重启点个数，表示无效，有效值是[0，num_restarts-1]
     assert(num_restarts_ > 0);
   }
 
@@ -153,6 +157,7 @@ class Block::Iter : public Iterator {
     ParseNextKey();
   }
 
+  //先找到前一个key-value所在的restart，然后从restart处遍历
   virtual void Prev() {
     assert(Valid());
 
@@ -171,6 +176,7 @@ class Block::Iter : public Iterator {
     SeekToRestartPoint(restart_index_);// 然后跳到这个restart range.
     do {
       // Loop until end of current entry hits the start of original entry
+      //当找到prev的key-value时，经过ParseNextKey解析后，NextEntryOffset会等于original，然后跳出循环
     } while (ParseNextKey() && NextEntryOffset() < original);// 在这个restart range里面遍历.
   }
 
@@ -181,7 +187,8 @@ class Block::Iter : public Iterator {
     // with a key < target
     uint32_t left = 0;
     uint32_t right = num_restarts_ - 1;
-    while (left < right) {// 在restart这些部分二分查找.
+    //在restart point进行二分查找，用restart point的第一个key进行比较
+    while (left < right) {
       uint32_t mid = (left + right + 1) / 2;
       uint32_t region_offset = GetRestartPoint(mid);
       uint32_t shared, non_shared, value_length;
@@ -205,26 +212,31 @@ class Block::Iter : public Iterator {
     }
 
     // Linear search (within restart block) for first key >= target
+    //找到目标可能在的restart point处
+    // 从这个部分开始遍历查找.
     SeekToRestartPoint(left);
-    while (true) {// 从这个部分开始遍历查找.
+    while (true) {
+      //如果是最后一个restart point，可能会解析失败那么返回
       if (!ParseNextKey()) {
         return;
       }
+      //如果==0 说明找到了，当前key-value就是的，否则当前key-value就是大于target的
       if (Compare(key_, target) >= 0) {
         return;
       }
     }
   }
 
-  //构造出一个迭代器之后，首先要将迭代器的当前记录指向首位置，当前记录所在索引赋值为0
-  /// 然后解析下一个元素即可.
+  //先跳到第一个restart point处，然后解析下一个元素即第一个元素
   virtual void SeekToFirst() {
     SeekToRestartPoint(0);
     ParseNextKey();
   }
-
+  
+  //跳到最后一个restart point
   virtual void SeekToLast() {
     SeekToRestartPoint(num_restarts_ - 1);
+    //经过ParseNextKey解析最后一个key-value后，NextEntryOffset会==restarts
     while (ParseNextKey() && NextEntryOffset() < restarts_) {
       // Keep skipping
     }
