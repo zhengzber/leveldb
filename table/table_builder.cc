@@ -21,14 +21,14 @@ struct TableBuilder::Rep {
   Options options; //上游传过来的options，是open的参数
   Options index_block_options; // index option
   WritableFile* file; // sst 文件封装类
-  uint64_t offset; //当前向这个file写入了多少数据，sst文件的偏移量，每写入一个块后，更新这个变量
+  uint64_t offset; //当前sst文件的下个可写偏移量，记录data-block和其它Block的开始位置
   Status status; //file操作返回的status
   BlockBuilder data_block; //写data block的类
   BlockBuilder index_block; //写index block的类
-  std::string last_key; //上次插入的键值，用于写index block时最大键值
-  int64_t num_entries;//已经插入了多少个kv
+  std::string last_key; //上次加入的key-value的key，用于和当前key来找comparator或当前没有key了用来找short successor
+  int64_t num_entries;//已经加入的key-value数量
   bool closed;          // Either Finish() or Abandon() has been called. 文件写结束了
-  FilterBlockBuilder* filter_block; //创建过滤器的类
+  FilterBlockBuilder* filter_block; //filter-block的builder
 
   // We do not emit the index entry for a block until we have seen the
   // first key for the next data block.  This allows us to use shorter
@@ -39,8 +39,8 @@ struct TableBuilder::Rep {
   // blocks.
   //
   // Invariant: r->pending_index_entry is true only if data_block is empty.
-  bool pending_index_entry;//data block为空时，该值为true,用于写handler
-  BlockHandle pending_handle;  // Handle to add to index block 用于写index block的handler
+  bool pending_index_entry;//当前加入的key是不是data-block的第一个key
+  BlockHandle pending_handle;  // Handle to add to index block 待写入sst的data-block的offset和size
 
   std::string compressed_output; //作为compressed存放的内容.
 
@@ -57,7 +57,7 @@ struct TableBuilder::Rep {
                      : new FilterBlockBuilder(opt.filter_policy)),
         pending_index_entry(false) {
     //里面存放的key是全量，即用BlockBuilder来构造index block，只要把interval设置为1，即每个记录放的是完整的key和value
-    //不存在共享key
+    //即index-block的key不存在前缀压缩
     index_block_options.block_restart_interval = 1;
   }
 };
@@ -102,8 +102,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
 
-  ////当data_block为空时，将上个datablock的handler添加到index block
-  //如果这里新开辟一个block的话对于第一块没有.
+  //如果待加入的key是当前data-block的第一个key
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
     //// 那么我们这里做一个index.
@@ -113,6 +112,8 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
     //阅读完Finish会发现这里handle_encoding实际上是就是last_key的位置.
     // 这里使用FindShortestSeparator更加节省空间作为index_block里面的内容.:).
     // 但这里也决定了index_block的key不能够作为data block里面准确的key.
+    
+    //将上个data-block的位置加入index-block中，找到shortest separator作为分隔key
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
     std::string handle_encoding;
     r->pending_handle.EncodeTo(&handle_encoding);////将handle解码到字符串handle_encoding
@@ -128,7 +129,7 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   // 更新last_key并且插入data block.
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;//记录数+1
-  r->data_block.Add(key, value);//数据块添加记录
+  r->data_block.Add(key, value);//data-block添加key-value
   
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
   //如果当前data block的大小超过设定的值，那么刷新到磁盘
@@ -144,7 +145,7 @@ void TableBuilder::Flush() {
   if (r->data_block.empty()) return;
   assert(!r->pending_index_entry);
   //将数据写回缓冲区
-  // 将data block作为Block写入然后将这个handle放在pengding_handle里面.
+  // 第二个参数是出参，后面的函数会把当前data-block的offset和size记录到pending-handle中
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
     r->pending_index_entry = true;
@@ -156,6 +157,8 @@ void TableBuilder::Flush() {
 }
 
 //这个函数主要是用于判断data block的数据是否要压缩存储，真正下操作在下面函数： 
+//handle是出参，用于记录这个block写入到文件的offset和size。方便后面写。例如，data-block调用这个函数，
+//那么handle会记录data-block的起始offset和size，然后offset和size作为index-block的value记录下来。
 void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   // File format contains a sequence of blocks where each block has:
   //    block_data: uint8[n]
@@ -199,9 +202,9 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
                                  CompressionType type,
                                  BlockHandle* handle) {
   Rep* r = rep_;
-  handle->set_offset(r->offset);//设置当前块的偏移量，即设置index block的handle内容。
-  handle->set_size(block_contents.size());//设置当前块的大小
-  r->status = r->file->Append(block_contents);//将内容写进用户态缓冲区
+  handle->set_offset(r->offset);//将准备写入sst的data-block的offset记录到pending-handle中
+  handle->set_size(block_contents.size());//将准备写入sst的data-block的size记录到pending-handle中
+  r->status = r->file->Append(block_contents);//将block内容追加到文件中
   if (r->status.ok()) {
     char trailer[kBlockTrailerSize];
     trailer[0] = type; //追加type和crc
@@ -223,27 +226,32 @@ Status TableBuilder::status() const {
 //sst写完成函数，用于上层调用
 Status TableBuilder::Finish() {
   Rep* r = rep_;
-  Flush();//刷新最后的数据
+  Flush();//将当前的data-block的数据追加到文件中
   assert(!r->closed);
   r->closed = true;
 
   BlockHandle filter_block_handle, metaindex_block_handle, index_block_handle;
+  // filter_block_handle记录filter-block的offset和size
+  // metaindex_block_handle记录metaindex-block的offset和size
+  // index-block_handler记录index-block的offset和size
 
-  // Write filter block
-  // 写Meta block，调用filterblockbuilder的finish函数返回所有内容
+  //至此，data-block的内容都写入到了sstable中了，接下来开始写其他Block内容
+  
+  // 写filter block，调用filterblockbuilder的finish函数返回所有内容
+  //将filter-block的offset和size记录到filter_block_handle中
   if (ok() && r->filter_block != NULL) {
     WriteRawBlock(r->filter_block->Finish(), kNoCompression,
                   &filter_block_handle);//将这个meta block的偏移量和写进filter_block_handle，用于metaindex block写
   }
 
-  // Write metaindex block
+  // Write filter-index block
   // 写metaindex block
   if (ok()) {
     BlockBuilder meta_index_block(&r->options);
     if (r->filter_block != NULL) {
-      // Add mapping from "filter.Name" to location of filter data
        // meta_index block块内容格式为"filter.Name"
-      // 实际上这个meta_index_block部分没有任何内容.
+      // key是"filter+name"
+      //value是BlockHandle encode的string，这里是filter-block的offset和size
       std::string key = "filter.";
       key.append(r->options.filter_policy->Name());
       std::string handle_encoding;
@@ -252,20 +260,23 @@ Status TableBuilder::Finish() {
     }
 
     // TODO(postrelease): Add stats and other meta blocks
-    WriteBlock(&meta_index_block, &metaindex_block_handle); // 写入之后然后得到handle.
+    //将meta-index-block的内容追加到文件，meta-index-block的offset和size记录在metaindex_block_handle中
+    WriteBlock(&meta_index_block, &metaindex_block_handle); 
   }
 
-  // Write index block
   // 写index block
   if (ok()) {
+    //如果有data-block追加到文件后，pending_index_entry=true
     if (r->pending_index_entry) {
-      r->options.comparator->FindShortSuccessor(&r->last_key);
+      //记录最后一个追加的data-block的offset和size并放入index-block中
+      r->options.comparator->FindShortSuccessor(&r->last_key);//因为没有新的key了，使用last_key的short successor作为分隔的最后的key
       std::string handle_encoding;
-      r->pending_handle.EncodeTo(&handle_encoding);
-      r->index_block.Add(r->last_key, Slice(handle_encoding));
+      r->pending_handle.EncodeTo(&handle_encoding);//encode最后一个data-block的offset和size
+      r->index_block.Add(r->last_key, Slice(handle_encoding));//添加到index-block中
       r->pending_index_entry = false;
     }//写finish里flush函数刷新的数据块的偏移量和大小
     // 写入index block.
+    //将index-block写入文件，并用index_block_handle来记录index-block的offset和size
     WriteBlock(&r->index_block, &index_block_handle);
   }
 
@@ -273,11 +284,11 @@ Status TableBuilder::Finish() {
   // 写Footer
   if (ok()) {
     Footer footer;
-    footer.set_metaindex_handle(metaindex_block_handle);
-    footer.set_index_handle(index_block_handle);
+    footer.set_metaindex_handle(metaindex_block_handle);//记录metaindex-block的offset和size
+    footer.set_index_handle(index_block_handle);//记录index-block的offset和size
     std::string footer_encoding;
     footer.EncodeTo(&footer_encoding);
-    r->status = r->file->Append(footer_encoding);
+    r->status = r->file->Append(footer_encoding); //将footer追加到文件中
     if (r->status.ok()) {
       r->offset += footer_encoding.size();//更新偏移量
     }
