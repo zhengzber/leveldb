@@ -943,6 +943,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       has_current_user_key = false;
       last_sequence_for_key = kMaxSequenceNumber;
     } else {
+      
+      //走到这个if说明这个key是第一次出现，设置last_sequence_for_key为最大
       if (!has_current_user_key ||
           user_comparator()->Compare(ikey.user_key,
                                      Slice(current_user_key)) != 0) {
@@ -952,12 +954,17 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
         last_sequence_for_key = kMaxSequenceNumber;
       }
 
+      //如果是第一次出现的key，因为last_sequence_for_key设置为最大了，所以肯定走不到这个if，能走到
+      //这个if说明肯定是第二次出现的key了，而且第二次出现的sequence比较旧了，可以删除了
       if (last_sequence_for_key <= compact->smallest_snapshot) {
         // Hidden by an newer entry for same user key
         drop = true;    // (A)
       } else if (ikey.type == kTypeDeletion &&
                  ikey.sequence <= compact->smallest_snapshot &&
                  compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
+        //走到这里的else if里，是第一次或第二次出现的key都有可能，不管是哪次出现的，如果是删除类型，并且sequence比较旧了，
+        //并且level+2层以上没有这个key了那么可以删除。否则不能删除。例如如果level+2中存在这个key，那么就不能删除，否则level+2层
+        //存在的key就是唯一的key了，这样这个key需要到下次和更高层的相同key合并的时候再删除。
         // For this user key:
         // (1) there is no data in higher levels
         // (2) data in lower levels will have larger sequence numbers
